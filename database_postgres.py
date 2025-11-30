@@ -6,34 +6,24 @@ import hashlib
 import secrets
 
 def get_db_connection():
-    """Test EXTERNAL Railway URL"""
-    import streamlit as st
-    
+    """Get PostgreSQL database connection - PRODUCTION VERSION"""
     try:
-        # Your EXTERNAL Railway URL
-        database_url = "postgresql://postgres:NIGBwEsHchbcufaZoZNKHPZuTwSGQQBI@nozomi.proxy.rlwy.net:29645/railway"
+        database_url = os.environ.get('DATABASE_URL')
         
-        st.sidebar.write("🔧 Testing EXTERNAL Railway URL...")
-        st.sidebar.write(f"🔧 Host: nozomi.proxy.rlwy.net")
-        st.sidebar.write(f"🔧 Port: 29645")
+        if not database_url:
+            return None
+            
+        if database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql://", 1)
         
         engine = create_engine(database_url)
-        conn = engine.connect()
-        
-        # Test a simple query
-        result = conn.execute(text("SELECT version()"))
-        version = result.fetchone()
-        st.sidebar.success(f"✅ Connected to PostgreSQL!")
-        st.sidebar.write(f"🔧 Version: {version[0][:30]}...")
-        
-        return conn
-        
+        return engine.connect()
     except Exception as e:
-        st.sidebar.error(f"❌ EXTERNAL connection failed: {str(e)}")
+        print(f"PostgreSQL connection failed: {e}")
         return None
 
 def init_postgres_db():
-    """Initialize PostgreSQL database tables - SAFE"""
+    """Initialize PostgreSQL database tables - PRODUCTION"""
     try:
         conn = get_db_connection()
         if not conn:
@@ -70,11 +60,10 @@ def init_postgres_db():
         
         conn.commit()
         conn.close()
-        print("✅ PostgreSQL database initialized!")
         return True
         
     except Exception as e:
-        print(f"❌ PostgreSQL init failed: {e}")
+        print(f"PostgreSQL init failed: {e}")
         return False
 
 def hash_password(password):
