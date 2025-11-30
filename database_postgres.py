@@ -6,25 +6,30 @@ import hashlib
 import secrets
 
 def get_db_connection():
-    """Get PostgreSQL database connection - TEMPORARY TEST"""
+    """Test EXTERNAL Railway URL"""
     import streamlit as st
     
     try:
-        # TEMPORARY: Hardcode your Railway URL for testing
-        database_url = "your_railway_database_url_here"
+        # Your EXTERNAL Railway URL
+        database_url = "postgresql://postgres:NIGBwEsHchbcufaZoZNKHPZuTwSGQQBI@nozomi.proxy.rlwy.net:29645/railway"
         
-        st.sidebar.write("🔧 USING HARDCODED URL FOR TESTING")
-        
-        if database_url.startswith("postgres://"):
-            database_url = database_url.replace("postgres://", "postgresql://", 1)
+        st.sidebar.write("🔧 Testing EXTERNAL Railway URL...")
+        st.sidebar.write(f"🔧 Host: nozomi.proxy.rlwy.net")
+        st.sidebar.write(f"🔧 Port: 29645")
         
         engine = create_engine(database_url)
         conn = engine.connect()
-        st.sidebar.success("✅ Hardcoded connection successful!")
+        
+        # Test a simple query
+        result = conn.execute(text("SELECT version()"))
+        version = result.fetchone()
+        st.sidebar.success(f"✅ Connected to PostgreSQL!")
+        st.sidebar.write(f"🔧 Version: {version[0][:30]}...")
+        
         return conn
         
     except Exception as e:
-        st.sidebar.error(f"❌ Hardcoded connection failed: {str(e)}")
+        st.sidebar.error(f"❌ EXTERNAL connection failed: {str(e)}")
         return None
 
 def init_postgres_db():
