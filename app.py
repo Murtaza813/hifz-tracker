@@ -48,31 +48,42 @@ def show_login_page():
     tab1, tab2 = st.tabs(["🔐 Teacher Login", "📝 Teacher Registration"])
     
     with tab1:
-        st.subheader("Teacher Login")
-        st.info("🔒 Each teacher sees only their own students and data")
+    st.subheader("Teacher Login")
+    st.info("🔒 Each teacher sees only their own students and data")
+    
+    # DEBUG INFO
+    st.markdown("---")
+    st.markdown("**🔧 Debug Info:**")
+    st.code(f"Session state: logged_in={st.session_state.get('logged_in', 'Not set')}")
+    st.code(f"Session state: user={st.session_state.get('user', 'Not set')}")
+    st.markdown("---")
+    
+    with st.form("login_form"):
+        username = st.text_input("👤 Teacher Username", value="Murtaza53")
+        password = st.text_input("🔒 Password", type="password", value="Aliquader53")
+        login_button = st.form_submit_button("🚀 Login as Teacher")
         
-        with st.form("login_form"):
-            username = st.text_input("👤 Teacher Username")
-            password = st.text_input("🔒 Password", type="password")
-            login_button = st.form_submit_button("🚀 Login as Teacher")
-            
-            if login_button:
-                if username and password:
-                    try:
-                        from database_postgres import authenticate_user
-                        user = authenticate_user(username, password)
-                        if user:
-                            st.session_state.user = user
-                            st.session_state.logged_in = True
-                            st.session_state.teacher_id = user['id']
-                            st.success(f"👋 Welcome, Teacher {user['full_name'] or user['username']}!")
-                            st.rerun()
-                        else:
-                            st.error("Invalid teacher username or password")
-                    except Exception as e:
-                        st.error("Authentication system temporarily unavailable")
-                else:
-                    st.warning("Please enter both username and password")
+        if login_button:
+            if username and password:
+                try:
+                    from database_postgres import authenticate_user
+                    user = authenticate_user(username, password)
+                    
+                    # DEBUG: Show what authenticate_user returned
+                    st.write(f"🔧 DEBUG: authenticate_user returned: {user}")
+                    
+                    if user:
+                        st.session_state.user = user
+                        st.session_state.logged_in = True
+                        st.session_state.teacher_id = user['id']
+                        st.success(f"👋 Welcome, Teacher {user['full_name'] or user['username']}!")
+                        st.rerun()
+                    else:
+                        st.error("Invalid teacher username or password")
+                except Exception as e:
+                    st.error(f"Authentication system temporarily unavailable: {str(e)}")
+            else:
+                st.warning("Please enter both username and password")
     
     with tab2:
         st.subheader("Teacher Registration")
@@ -105,8 +116,19 @@ def show_login_page():
                         st.error("Registration system temporarily unavailable")
 
 def check_authentication():
-    """Check if teacher is authenticated - PRODUCTION VERSION"""
-    # Try PostgreSQL first
+    """Check if teacher is authenticated - FIXED VERSION"""
+    # Initialize session state
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
+    
+    if 'user' not in st.session_state:
+        st.session_state.user = None
+    
+    # If already logged in, return user
+    if st.session_state.logged_in and st.session_state.user:
+        return st.session_state.user
+    
+    # Try PostgreSQL authentication
     try:
         from database_postgres import get_db_connection, init_postgres_db, create_default_admin
         
@@ -117,20 +139,24 @@ def check_authentication():
             create_default_admin()
             conn.close()
             
-            # Check if user is logged in
-            if 'logged_in' not in st.session_state:
-                st.session_state.logged_in = False
-            
+            # Show login page if not logged in
             if not st.session_state.logged_in:
                 show_login_page()
                 st.stop()  # Stop until logged in
             
             return st.session_state.user
         else:
-            # Fallback to access code
+            # If no database connection, fallback to access code
+            st.warning("⚠️ Database connection failed - using access code system")
+            if not check_access_code():
+                st.stop()
             return None
+            
     except Exception as e:
-        # Fallback to access code
+        # If any error, fallback to access code
+        st.warning(f"⚠️ Authentication system unavailable - using access code: {str(e)}")
+        if not check_access_code():
+            st.stop()
         return None
 # =========================================================================
 # 🔐 ACCESS CODE PROTECTION SYSTEM - SECURE VERSION
@@ -3530,6 +3556,7 @@ if __name__ == "__main__":
 # END OF APPLICATION - CLEAN VERSION COMPLETE! 🎉
 
 # =========================================================================
+
 
 
 
