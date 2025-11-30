@@ -105,66 +105,33 @@ def show_login_page():
                         st.error("Registration system temporarily unavailable")
 
 def check_authentication():
-    """Check if teacher is authenticated - DEBUG VERSION"""
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**🔧 DEBUG MODE**")
-    
-    # Test if we can access environment variables at all
-    import os
-    st.sidebar.write("🔧 Testing environment access...")
-    test_env = os.environ.get('PATH')  # This should always exist
-    st.sidebar.write(f"🔧 PATH exists: {bool(test_env)}")
-    
+    """Check if teacher is authenticated - PRODUCTION VERSION"""
     # Try PostgreSQL first
     try:
-        st.sidebar.write("🔄 Step 1: Importing PostgreSQL...")
         from database_postgres import get_db_connection, init_postgres_db, create_default_admin
         
-        st.sidebar.success("✅ PostgreSQL import successful!")
-        
-        st.sidebar.write("🔄 Step 2: Testing database connection...")
+        # Initialize database
         conn = get_db_connection()
-        
         if conn:
-            st.sidebar.success("✅ Database connection successful!")
+            init_postgres_db()
+            create_default_admin()
+            conn.close()
             
-            st.sidebar.write("🔄 Step 3: Initializing database...")
-            init_success = init_postgres_db()
+            # Check if user is logged in
+            if 'logged_in' not in st.session_state:
+                st.session_state.logged_in = False
             
-            if init_success:
-                st.sidebar.success("✅ Database initialized!")
-                
-                st.sidebar.write("🔄 Step 4: Creating default admin...")
-                create_default_admin()
-                st.sidebar.success("✅ Default admin created!")
-                
-                conn.close()
-                
-                # Check if user is logged in
-                if 'logged_in' not in st.session_state:
-                    st.session_state.logged_in = False
-                
-                if not st.session_state.logged_in:
-                    st.sidebar.write("🔄 Step 5: Showing login page...")
-                    show_login_page()
-                    st.stop()  # Stop until logged in
-                
-                return st.session_state.user
-            else:
-                st.sidebar.error("❌ Database initialization failed!")
-                return None
+            if not st.session_state.logged_in:
+                show_login_page()
+                st.stop()  # Stop until logged in
+            
+            return st.session_state.user
         else:
-            st.sidebar.error("❌ Database connection failed!")
-            st.sidebar.write("Falling back to access code...")
+            # Fallback to access code
             return None
-            
     except Exception as e:
-        st.sidebar.error(f"❌ PostgreSQL error: {str(e)}")
-        import traceback
-        st.sidebar.write(f"Full error: {traceback.format_exc()}")
-        st.sidebar.write("Falling back to access code...")
+        # Fallback to access code
         return None
-
 # =========================================================================
 # 🔐 ACCESS CODE PROTECTION SYSTEM - SECURE VERSION
 # =========================================================================
@@ -3202,12 +3169,6 @@ def main():
     
     # 🔐 CHECK TEACHER AUTHENTICATION FIRST
     user = check_authentication()
-
-    # DEBUG: Show what we got
-    st.sidebar.markdown("---")
-    st.sidebar.markdown(f"**Authentication Result:**")
-    st.sidebar.write(f"User: {user}")
-    st.sidebar.write(f"Logged in: {st.session_state.get('logged_in', 'Not set')}")
     
     if user:
         # Teacher is logged in - show teacher info
@@ -3569,6 +3530,7 @@ if __name__ == "__main__":
 # END OF APPLICATION - CLEAN VERSION COMPLETE! 🎉
 
 # =========================================================================
+
 
 
 
