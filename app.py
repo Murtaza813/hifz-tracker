@@ -48,53 +48,53 @@ def show_login_page():
     tab1, tab2 = st.tabs(["🔐 Teacher Login", "📝 Teacher Registration"])
     
     with tab1:
-    st.subheader("Teacher Login")
-    st.info("🔒 Each teacher sees only their own students and data")
-    
-    # DEBUG INFO
-    st.markdown("---")
-    st.markdown("**🔧 Debug Info:**")
-    st.code(f"Session state: logged_in={st.session_state.get('logged_in', 'Not set')}")
-    st.code(f"Session state: user={st.session_state.get('user', 'Not set')}")
-    st.markdown("---")
-    
-    with st.form("login_form"):
-        username = st.text_input("👤 Teacher Username", value="Murtaza53")
-        password = st.text_input("🔒 Password", type="password", value="Aliquader53")
-        login_button = st.form_submit_button("🚀 Login as Teacher")
+        st.subheader("Teacher Login")
+        st.info("🔒 Each teacher sees only their own students and data")
         
-        if login_button:
-            if username and password:
-                try:
-                    from database_postgres import authenticate_user
-                    user = authenticate_user(username, password)
-                    
-                    # DEBUG: Show what authenticate_user returned
-                    st.write(f"🔧 DEBUG: authenticate_user returned: {user}")
-                    
-                    if user:
-                        st.session_state.user = user
-                        st.session_state.logged_in = True
-                        st.session_state.teacher_id = user['id']
-                        st.success(f"👋 Welcome, Teacher {user['full_name'] or user['username']}!")
-                        st.rerun()
-                    else:
-                        st.error("Invalid teacher username or password")
-                except Exception as e:
-                    st.error(f"Authentication system temporarily unavailable: {str(e)}")
-            else:
-                st.warning("Please enter both username and password")
+        # DEBUG INFO
+        st.markdown("---")
+        st.markdown("**🔧 Debug Info:**")
+        st.code(f"Session state: logged_in={st.session_state.get('logged_in', 'Not set')}")
+        st.code(f"Session state: user={st.session_state.get('user', 'Not set')}")
+        st.markdown("---")
+        
+        with st.form("login_form"):
+            username = st.text_input("👤 Teacher Username", value="Murtaza53")
+            password = st.text_input("🔒 Password", type="password", value="Aliquader53")
+            login_button = st.form_submit_button("🚀 Login as Teacher")
+            
+            if login_button:
+                if username and password:
+                    try:
+                        from database_postgres import authenticate_user
+                        user = authenticate_user(username, password)
+                        
+                        # DEBUG: Show what authenticate_user returned
+                        st.write(f"🔧 DEBUG: authenticate_user returned: {user}")
+                        
+                        if user:
+                            st.session_state.user = user
+                            st.session_state.logged_in = True
+                            st.session_state.teacher_id = user['id']
+                            st.success(f"👋 Welcome, Teacher {user['full_name'] or user['username']}!")
+                            st.rerun()
+                        else:
+                            st.error("Invalid teacher username or password")
+                    except Exception as e:
+                        st.error(f"Authentication system temporarily unavailable: {str(e)}")
+                else:
+                    st.warning("Please enter both username and password")
     
     with tab2:
         st.subheader("Teacher Registration")
         st.info("✨ Create your teacher account to start tracking students")
         
         with st.form("register_form"):
-            full_name = st.text_input("👤 Teacher Full Name")
-            username = st.text_input("👤 Choose Username")
-            email = st.text_input("📧 Email Address")
-            password = st.text_input("🔒 Password", type="password", key="reg_pass")
-            confirm_password = st.text_input("🔒 Confirm Password", type="password")
+            full_name = st.text_input("👤 Teacher Full Name", value="Murtaza Haider")
+            username = st.text_input("👤 Choose Username", value="Murtaza53")
+            email = st.text_input("📧 Email Address", value="murtazahaiderint@gmail.com")
+            password = st.text_input("🔒 Password", type="password", value="Aliquader53", key="reg_pass")
+            confirm_password = st.text_input("🔒 Confirm Password", type="password", value="Aliquader53")
             
             register_button = st.form_submit_button("✨ Create Teacher Account")
             
@@ -108,12 +108,17 @@ def show_login_page():
                 else:
                     try:
                         from database_postgres import create_user
-                        if create_user(username, email, password, full_name, "teacher"):
+                        success = create_user(username, email, password, full_name, "teacher")
+                        
+                        # DEBUG: Show what create_user returned
+                        st.write(f"🔧 DEBUG: create_user returned: {success}")
+                        
+                        if success:
                             st.success("✅ Teacher account created! Please login.")
                         else:
                             st.error("Username or email already exists")
-                    except:
-                        st.error("Registration system temporarily unavailable")
+                    except Exception as e:
+                        st.error(f"Registration system temporarily unavailable: {str(e)}")
 
 def check_authentication():
     """Check if teacher is authenticated - DEBUG VERSION"""
@@ -3565,6 +3570,7 @@ if __name__ == "__main__":
 # END OF APPLICATION - CLEAN VERSION COMPLETE! 🎉
 
 # =========================================================================
+
 
 
 
