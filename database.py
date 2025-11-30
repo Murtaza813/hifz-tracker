@@ -3,22 +3,31 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from datetime import datetime
 
-def get_db_connection():
-    """Get PostgreSQL database connection for Railway"""
+def debug_database_connection():
+    """Debug database connection"""
     try:
         database_url = os.environ.get('DATABASE_URL')
+        print(f"🔧 DEBUG: DATABASE_URL exists: {database_url is not None}")
+        if database_url:
+            print(f"🔧 DEBUG: DATABASE_URL: {database_url[:50]}...")
         
-        if not database_url:
-            return None
+        conn = get_db_connection()
+        if conn:
+            print("✅ DEBUG: Database connection successful!")
             
-        if database_url.startswith("postgres://"):
-            database_url = database_url.replace("postgres://", "postgresql://", 1)
-        
-        engine = create_engine(database_url)
-        return engine.connect()
+            # Test if tables exist
+            result = conn.execute(text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'students')"))
+            tables_exist = result.fetchone()[0]
+            print(f"🔧 DEBUG: Students table exists: {tables_exist}")
+            
+            conn.close()
+            return True
+        else:
+            print("❌ DEBUG: Database connection failed")
+            return False
     except Exception as e:
-        print(f"Database connection error: {e}")
-        return None
+        print(f"❌ DEBUG: Database error: {e}")
+        return False
 
 def init_db():
     """Initialize PostgreSQL database tables"""
@@ -524,3 +533,4 @@ def get_last_jadeed_page(all_data_df):
     except Exception as e:
         print(f"Error in get_last_jadeed_page: {e}")
         return None
+
