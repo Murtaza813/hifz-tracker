@@ -116,21 +116,30 @@ def show_login_page():
                         st.error("Registration system temporarily unavailable")
 
 def check_authentication():
-    """Check if teacher is authenticated - FIXED VERSION"""
+    """Check if teacher is authenticated - DEBUG VERSION"""
     # Initialize session state
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
-    
-    if 'user' not in st.session_state:
         st.session_state.user = None
-    
+        st.session_state.teacher_id = None
+
+    # DEBUG: Show current session state
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**🔧 Session Debug:**")
+    st.sidebar.write(f"Logged in: {st.session_state.logged_in}")
+    st.sidebar.write(f"User: {st.session_state.user}")
+    st.sidebar.markdown("---")
+
     # If already logged in, return user
     if st.session_state.logged_in and st.session_state.user:
+        st.sidebar.success(f"👋 Welcome, {st.session_state.user.get('full_name', st.session_state.user.get('username'))}!")
         return st.session_state.user
-    
+
     # Try PostgreSQL authentication
     try:
         from database_postgres import get_db_connection, init_postgres_db, create_default_admin
+        
+        st.sidebar.info("🔧 Initializing database...")
         
         # Initialize database
         conn = get_db_connection()
@@ -147,14 +156,14 @@ def check_authentication():
             return st.session_state.user
         else:
             # If no database connection, fallback to access code
-            st.warning("⚠️ Database connection failed - using access code system")
+            st.sidebar.warning("⚠️ Database connection failed - using access code system")
             if not check_access_code():
                 st.stop()
             return None
             
     except Exception as e:
         # If any error, fallback to access code
-        st.warning(f"⚠️ Authentication system unavailable - using access code: {str(e)}")
+        st.sidebar.warning(f"⚠️ Authentication system unavailable: {str(e)}")
         if not check_access_code():
             st.stop()
         return None
@@ -3556,6 +3565,7 @@ if __name__ == "__main__":
 # END OF APPLICATION - CLEAN VERSION COMPLETE! 🎉
 
 # =========================================================================
+
 
 
 
