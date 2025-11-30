@@ -109,6 +109,12 @@ def check_authentication():
     st.sidebar.markdown("---")
     st.sidebar.markdown("**🔧 DEBUG MODE**")
     
+    # Test if we can access environment variables at all
+    import os
+    st.sidebar.write("🔧 Testing environment access...")
+    test_env = os.environ.get('PATH')  # This should always exist
+    st.sidebar.write(f"🔧 PATH exists: {bool(test_env)}")
+    
     # Try PostgreSQL first
     try:
         st.sidebar.write("🔄 Step 1: Importing PostgreSQL...")
@@ -154,6 +160,8 @@ def check_authentication():
             
     except Exception as e:
         st.sidebar.error(f"❌ PostgreSQL error: {str(e)}")
+        import traceback
+        st.sidebar.write(f"Full error: {traceback.format_exc()}")
         st.sidebar.write("Falling back to access code...")
         return None
 
@@ -3561,5 +3569,6 @@ if __name__ == "__main__":
 # END OF APPLICATION - CLEAN VERSION COMPLETE! 🎉
 
 # =========================================================================
+
 
 
