@@ -6,42 +6,52 @@ import hashlib
 import secrets
 
 def get_db_connection():
-    """Get PostgreSQL database connection - DEBUG VERSION"""
+    """Get PostgreSQL database connection - STREAMLIT DEBUG VERSION"""
+    import streamlit as st
+    
     try:
-        # DEBUG: Show ALL environment variables (for debugging)
-        print("🔧 DEBUG: Checking environment variables...")
-        env_vars = {k: v for k, v in os.environ.items() if 'DATABASE' in k.upper() or 'URL' in k.upper()}
-        print(f"🔧 DEBUG: Relevant env vars: {env_vars}")
+        st.sidebar.write("🔧 DATABASE DEBUG: Starting connection...")
         
+        # Show all relevant environment variables
         database_url = os.environ.get('DATABASE_URL')
+        st.sidebar.write(f"🔧 DATABASE_URL exists: {bool(database_url)}")
         
-        print(f"🔧 DEBUG: DATABASE_URL found: {bool(database_url)}")
-        if database_url:
-            print(f"🔧 DEBUG: URL type: {type(database_url)}")
-            print(f"🔧 DEBUG: URL length: {len(database_url)}")
-            print(f"🔧 DEBUG: URL starts with: {database_url[:25]}...")  # First 25 chars only
-            
         if not database_url:
-            print("❌ DEBUG: No DATABASE_URL found in environment")
-            # Let's try some common alternatives
-            database_url = os.environ.get('POSTGRES_URL') or os.environ.get('RAILWAY_URL')
-            print(f"🔧 DEBUG: Tried alternatives: {database_url}")
-            return None
+            st.sidebar.error("❌ DATABASE_URL not found in environment!")
+            st.sidebar.write("🔧 Checking common alternative names...")
             
+            # Check common alternative names
+            alternatives = ['POSTGRES_URL', 'RAILWAY_DATABASE_URL', 'POSTGRESQL_URL', 'DB_URL']
+            for alt in alternatives:
+                alt_url = os.environ.get(alt)
+                st.sidebar.write(f"🔧 {alt}: {bool(alt_url)}")
+                if alt_url:
+                    database_url = alt_url
+                    st.sidebar.success(f"✅ Found in {alt}!")
+                    break
+            
+            if not database_url:
+                st.sidebar.error("❌ No database URL found in any environment variable!")
+                return None
+        
+        st.sidebar.write(f"🔧 URL starts with: {database_url[:20]}..." if database_url else "No URL")
+        
+        # Fix common URL format issues
         if database_url.startswith("postgres://"):
             database_url = database_url.replace("postgres://", "postgresql://", 1)
-            print("🔧 DEBUG: Converted postgres:// to postgresql://")
+            st.sidebar.write("🔧 Converted postgres:// to postgresql://")
         
-        print("🔧 DEBUG: Creating engine...")
+        st.sidebar.write("🔧 Creating database engine...")
         engine = create_engine(database_url)
+        
+        st.sidebar.write("🔧 Attempting connection...")
         conn = engine.connect()
-        print("✅ DEBUG: Connection successful!")
+        
+        st.sidebar.success("✅ Database connection successful!")
         return conn
         
     except Exception as e:
-        print(f"❌ DEBUG: Connection failed: {str(e)}")
-        import traceback
-        print(f"❌ DEBUG: Full error: {traceback.format_exc()}")
+        st.sidebar.error(f"❌ Database connection failed: {str(e)}")
         return None
 
 def init_postgres_db():
