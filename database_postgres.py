@@ -6,20 +6,31 @@ import hashlib
 import secrets
 
 def get_db_connection():
-    """Get PostgreSQL database connection - SAFE VERSION"""
+    """Get PostgreSQL database connection - DEBUG VERSION"""
     try:
         database_url = os.environ.get('DATABASE_URL')
         
+        # DEBUG: Show what we're getting
+        print(f"🔧 DEBUG: DATABASE_URL found: {bool(database_url)}")
+        if database_url:
+            print(f"🔧 DEBUG: URL starts with: {database_url[:20]}...")  # First 20 chars only for security
+            
         if not database_url:
+            print("❌ DEBUG: No DATABASE_URL found in environment")
             return None
             
         if database_url.startswith("postgres://"):
             database_url = database_url.replace("postgres://", "postgresql://", 1)
+            print("🔧 DEBUG: Converted postgres:// to postgresql://")
         
+        print("🔧 DEBUG: Creating engine...")
         engine = create_engine(database_url)
-        return engine.connect()
+        conn = engine.connect()
+        print("✅ DEBUG: Connection successful!")
+        return conn
+        
     except Exception as e:
-        print(f"PostgreSQL connection failed: {e}")
+        print(f"❌ DEBUG: Connection failed: {e}")
         return None
 
 def init_postgres_db():
