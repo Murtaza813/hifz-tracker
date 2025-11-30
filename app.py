@@ -3166,11 +3166,26 @@ def run_help_section():
 # =========================================================================
 
 def main():
-    """Main application with sidebar navigation"""
+    """Main application with teacher authentication"""
     
-    # 🔐 CHECK ACCESS CODE FIRST
+    # 🔐 CHECK TEACHER AUTHENTICATION FIRST
+    user = check_authentication()
+    
+    if user:
+        # Teacher is logged in - show teacher info
+        st.sidebar.markdown("---")
+        st.sidebar.markdown(f"**👤 Teacher:** {user['full_name'] or user['username']}")
+        st.sidebar.markdown("**🎯 Account:** Teacher")
+        st.sidebar.info("🔒 You only see your own students and data")
+        
+        if st.sidebar.button("🚪 Logout"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+    
+    # 🔐 ACCESS CODE CHECK (fallback - will be skipped if teacher is logged in)
     if not check_access_code():
-        st.stop()  # Don't run the rest if access code is wrong
+        st.stop()
     
     # ✅ ACCESS GRANTED - Show the main app
     st.sidebar.title("📚 Hifz Tracker System")
@@ -3516,3 +3531,4 @@ if __name__ == "__main__":
 # END OF APPLICATION - CLEAN VERSION COMPLETE! 🎉
 
 # =========================================================================
+
