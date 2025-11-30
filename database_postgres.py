@@ -6,52 +6,25 @@ import hashlib
 import secrets
 
 def get_db_connection():
-    """Get PostgreSQL database connection - STREAMLIT DEBUG VERSION"""
+    """Get PostgreSQL database connection - TEMPORARY TEST"""
     import streamlit as st
     
     try:
-        st.sidebar.write("🔧 DATABASE DEBUG: Starting connection...")
+        # TEMPORARY: Hardcode your Railway URL for testing
+        database_url = "your_railway_database_url_here"
         
-        # Show all relevant environment variables
-        database_url = os.environ.get('DATABASE_URL')
-        st.sidebar.write(f"🔧 DATABASE_URL exists: {bool(database_url)}")
+        st.sidebar.write("🔧 USING HARDCODED URL FOR TESTING")
         
-        if not database_url:
-            st.sidebar.error("❌ DATABASE_URL not found in environment!")
-            st.sidebar.write("🔧 Checking common alternative names...")
-            
-            # Check common alternative names
-            alternatives = ['POSTGRES_URL', 'RAILWAY_DATABASE_URL', 'POSTGRESQL_URL', 'DB_URL']
-            for alt in alternatives:
-                alt_url = os.environ.get(alt)
-                st.sidebar.write(f"🔧 {alt}: {bool(alt_url)}")
-                if alt_url:
-                    database_url = alt_url
-                    st.sidebar.success(f"✅ Found in {alt}!")
-                    break
-            
-            if not database_url:
-                st.sidebar.error("❌ No database URL found in any environment variable!")
-                return None
-        
-        st.sidebar.write(f"🔧 URL starts with: {database_url[:20]}..." if database_url else "No URL")
-        
-        # Fix common URL format issues
         if database_url.startswith("postgres://"):
             database_url = database_url.replace("postgres://", "postgresql://", 1)
-            st.sidebar.write("🔧 Converted postgres:// to postgresql://")
         
-        st.sidebar.write("🔧 Creating database engine...")
         engine = create_engine(database_url)
-        
-        st.sidebar.write("🔧 Attempting connection...")
         conn = engine.connect()
-        
-        st.sidebar.success("✅ Database connection successful!")
+        st.sidebar.success("✅ Hardcoded connection successful!")
         return conn
         
     except Exception as e:
-        st.sidebar.error(f"❌ Database connection failed: {str(e)}")
+        st.sidebar.error(f"❌ Hardcoded connection failed: {str(e)}")
         return None
 
 def init_postgres_db():
