@@ -32,6 +32,106 @@ from excel_handler import (
 )
 
 st.set_page_config(page_title="Hifz Progress Tracker", layout="wide", page_icon="📖")
+# =========================================================================
+# AUTHENTICATION SYSTEM - TEACHER ISOLATION
+# =========================================================================
+
+def show_login_page():
+    """Show login/register page for teacher isolation"""
+    st.markdown("""
+    <div style="text-align: center; padding: 50px 0;">
+        <h1 style="color: #1e3a8a; font-size: 3em;">📚 Hifz Tracker</h1>
+        <p style="color: #6b7280; font-size: 1.2em;">Teacher Account System - Your Students, Your Data</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    tab1, tab2 = st.tabs(["🔐 Teacher Login", "📝 Teacher Registration"])
+    
+    with tab1:
+        st.subheader("Teacher Login")
+        st.info("🔒 Each teacher sees only their own students and data")
+        
+        with st.form("login_form"):
+            username = st.text_input("👤 Teacher Username")
+            password = st.text_input("🔒 Password", type="password")
+            login_button = st.form_submit_button("🚀 Login as Teacher")
+            
+            if login_button:
+                if username and password:
+                    try:
+                        from database_postgres import authenticate_user
+                        user = authenticate_user(username, password)
+                        if user:
+                            st.session_state.user = user
+                            st.session_state.logged_in = True
+                            st.session_state.teacher_id = user['id']
+                            st.success(f"👋 Welcome, Teacher {user['full_name'] or user['username']}!")
+                            st.rerun()
+                        else:
+                            st.error("Invalid teacher username or password")
+                    except Exception as e:
+                        st.error("Authentication system temporarily unavailable")
+                else:
+                    st.warning("Please enter both username and password")
+    
+    with tab2:
+        st.subheader("Teacher Registration")
+        st.info("✨ Create your teacher account to start tracking students")
+        
+        with st.form("register_form"):
+            full_name = st.text_input("👤 Teacher Full Name")
+            username = st.text_input("👤 Choose Username")
+            email = st.text_input("📧 Email Address")
+            password = st.text_input("🔒 Password", type="password", key="reg_pass")
+            confirm_password = st.text_input("🔒 Confirm Password", type="password")
+            
+            register_button = st.form_submit_button("✨ Create Teacher Account")
+            
+            if register_button:
+                if not all([username, email, password, confirm_password]):
+                    st.error("Please fill all required fields")
+                elif password != confirm_password:
+                    st.error("Passwords do not match")
+                elif len(password) < 6:
+                    st.error("Password must be at least 6 characters")
+                else:
+                    try:
+                        from database_postgres import create_user
+                        if create_user(username, email, password, full_name, "teacher"):
+                            st.success("✅ Teacher account created! Please login.")
+                        else:
+                            st.error("Username or email already exists")
+                    except:
+                        st.error("Registration system temporarily unavailable")
+
+def check_authentication():
+    """Check if teacher is authenticated"""
+    # Try PostgreSQL first
+    try:
+        from database_postgres import get_db_connection, init_postgres_db, create_default_admin
+        
+        # Initialize database
+        conn = get_db_connection()
+        if conn:
+            init_postgres_db()
+            create_default_admin()
+            conn.close()
+            
+            # Check if user is logged in
+            if 'logged_in' not in st.session_state:
+                st.session_state.logged_in = False
+            
+            if not st.session_state.logged_in:
+                show_login_page()
+                st.stop()  # Stop until logged in
+            
+            return st.session_state.user
+        else:
+            # Fallback to access code
+            return None
+    except Exception as e:
+        # Fallback to access code
+        return None
 
 # =========================================================================
 # 🔐 ACCESS CODE PROTECTION SYSTEM - SECURE VERSION
@@ -3414,4 +3514,5 @@ if __name__ == "__main__":
 
 # =========================================================================
 # END OF APPLICATION - CLEAN VERSION COMPLETE! 🎉
+
 # =========================================================================
