@@ -34,22 +34,28 @@ from excel_handler import (
 st.set_page_config(page_title="Hifz Progress Tracker", layout="wide", page_icon="📖")
 
 # =========================================================================
-# 🔐 ACCESS CODE PROTECTION SYSTEM - SECURE VERSION
+# 🔐 ACCESS CODE PROTECTION SYSTEM - SECURE VERSION (FIXED)
 # =========================================================================
 
 def check_access_code():
     """Returns `True` if user enters correct access code"""
     
     def code_entered():
-        # 🔐 YOUR SECRET ACCESS CODE
-        if st.session_state["access_code"] == "Aaliquader53":
+        # ✅ FIX: Check if access_code exists in session state first
+        if "access_code" in st.session_state and st.session_state["access_code"] == "Aaliquader53":
             st.session_state["access_correct"] = True
-            del st.session_state["access_code"]
+            # Don't delete access_code yet, just mark as correct
         else:
             st.session_state["access_correct"] = False
 
-    # First run - show access code input
+    # Initialize session state variables
     if "access_correct" not in st.session_state:
+        st.session_state.access_correct = False
+    if "access_code" not in st.session_state:
+        st.session_state.access_code = ""
+
+    # First run - show access code input
+    if not st.session_state.access_correct:
         st.title("🔐 Hifz Tracker - Access Required")
         st.markdown("---")
         
@@ -59,34 +65,16 @@ def check_access_code():
                 "Enter Access Code", 
                 type="password", 
                 key="access_code",
-                placeholder="Enter the secret access code...",  # ← CHANGED! No hint!
+                placeholder="Enter the secret access code...",
                 label_visibility="collapsed"
             )
         with col2:
             st.button("🚀 Enter", on_click=code_entered, use_container_width=True)
         
-        st.markdown("---")
-        st.info("💡 **Contact administrator for access code**")
-        return False
-    
-    # Wrong code - show error
-    elif not st.session_state["access_correct"]:
-        st.title("🔐 Hifz Tracker - Access Required")
-        st.markdown("---")
+        # Show error if code was wrong
+        if "access_correct" in st.session_state and not st.session_state.access_correct and st.session_state.access_code:
+            st.error("❌ **Incorrect access code**")
         
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            st.text_input(
-                "Enter Access Code", 
-                type="password", 
-                key="access_code",
-                placeholder="Enter the secret access code...",  # ← CHANGED! No hint!
-                label_visibility="collapsed"
-            )
-        with col2:
-            st.button("🚀 Enter", on_click=code_entered, use_container_width=True)
-        
-        st.error("❌ **Incorrect access code**")
         st.markdown("---")
         st.info("💡 **Contact administrator for access code**")
         return False
@@ -3415,3 +3403,4 @@ if __name__ == "__main__":
 # =========================================================================
 # END OF APPLICATION - CLEAN VERSION COMPLETE! 🎉
 # =========================================================================
+
