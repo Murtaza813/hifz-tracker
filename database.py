@@ -3,31 +3,27 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from datetime import datetime
 
-def debug_database_connection():
-    """Debug database connection"""
+def get_db_connection():
+    """Get PostgreSQL database connection for Railway"""
     try:
         database_url = os.environ.get('DATABASE_URL')
-        print(f"🔧 DEBUG: DATABASE_URL exists: {database_url is not None}")
-        if database_url:
-            print(f"🔧 DEBUG: DATABASE_URL: {database_url[:50]}...")
         
-        conn = get_db_connection()
-        if conn:
-            print("✅ DEBUG: Database connection successful!")
+        if not database_url:
+            print("❌ No DATABASE_URL environment variable")
+            return None
             
-            # Test if tables exist
-            result = conn.execute(text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'students')"))
-            tables_exist = result.fetchone()[0]
-            print(f"🔧 DEBUG: Students table exists: {tables_exist}")
-            
-            conn.close()
-            return True
-        else:
-            print("❌ DEBUG: Database connection failed")
-            return False
+        if database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql://", 1)
+        
+        engine = create_engine(database_url)
+        conn = engine.connect()
+        print("✅ Database connection successful")
+        return conn
     except Exception as e:
-        print(f"❌ DEBUG: Database error: {e}")
-        return False
+        print(f"❌ Database connection failed: {e}")
+        return None
+
+# ... [rest of the database functions from my previous message, but add print statements to see what's happening]
 
 def init_db():
     """Initialize PostgreSQL database tables"""
@@ -203,6 +199,15 @@ def save_student_from_excel(parsed_data):
     if 'error' in parsed_data and parsed_data['error']:
         return None
     
+    # TEMPORARY: If no database, return a dummy student ID
+    conn = get_db_connection()
+    if not conn:
+        print("⚠️ WARNING: No database connection - using temporary storage")
+        # Return a temporary student ID
+        return "temp_student_001"
+    
+    # ... rest of your existing database code
+    
     data_format = parsed_data['format']
     student_info = parsed_data['student_info']
     
@@ -257,12 +262,23 @@ def save_student_from_excel(parsed_data):
         return None
 
 # ===== Get all student sessions =====
-def get_all_student_sessions(student_id):
-    """Get all sessions from both tables"""
+def get_all_students():
+    """Get all students from database"""
     try:
         conn = get_db_connection()
         if not conn:
-            return pd.DataFrame()
+            # Return empty if no database
+            return {}
+        
+        students = pd.read_sql(text('SELECT id, name FROM students ORDER BY name'), conn)
+        conn.close()
+        
+        if students.empty:
+            return {}
+        
+        return dict(zip(students['name'], students['id']))
+    except:
+        return {}
         
         # Fetch from uploaded_sessions
         uploaded = pd.read_sql(text('''
@@ -533,4 +549,5 @@ def get_last_jadeed_page(all_data_df):
     except Exception as e:
         print(f"Error in get_last_jadeed_page: {e}")
         return None
+
 
