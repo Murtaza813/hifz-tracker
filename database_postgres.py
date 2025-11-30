@@ -8,15 +8,24 @@ import secrets
 def get_db_connection():
     """Get PostgreSQL database connection - DEBUG VERSION"""
     try:
+        # DEBUG: Show ALL environment variables (for debugging)
+        print("🔧 DEBUG: Checking environment variables...")
+        env_vars = {k: v for k, v in os.environ.items() if 'DATABASE' in k.upper() or 'URL' in k.upper()}
+        print(f"🔧 DEBUG: Relevant env vars: {env_vars}")
+        
         database_url = os.environ.get('DATABASE_URL')
         
-        # DEBUG: Show what we're getting
         print(f"🔧 DEBUG: DATABASE_URL found: {bool(database_url)}")
         if database_url:
-            print(f"🔧 DEBUG: URL starts with: {database_url[:20]}...")  # First 20 chars only for security
+            print(f"🔧 DEBUG: URL type: {type(database_url)}")
+            print(f"🔧 DEBUG: URL length: {len(database_url)}")
+            print(f"🔧 DEBUG: URL starts with: {database_url[:25]}...")  # First 25 chars only
             
         if not database_url:
             print("❌ DEBUG: No DATABASE_URL found in environment")
+            # Let's try some common alternatives
+            database_url = os.environ.get('POSTGRES_URL') or os.environ.get('RAILWAY_URL')
+            print(f"🔧 DEBUG: Tried alternatives: {database_url}")
             return None
             
         if database_url.startswith("postgres://"):
@@ -30,7 +39,9 @@ def get_db_connection():
         return conn
         
     except Exception as e:
-        print(f"❌ DEBUG: Connection failed: {e}")
+        print(f"❌ DEBUG: Connection failed: {str(e)}")
+        import traceback
+        print(f"❌ DEBUG: Full error: {traceback.format_exc()}")
         return None
 
 def init_postgres_db():
