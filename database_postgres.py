@@ -11,15 +11,18 @@ def get_db_connection():
         database_url = os.environ.get('DATABASE_URL')
         
         if not database_url:
+            print("❌ DEBUG: No DATABASE_URL found")
             return None
             
         if database_url.startswith("postgres://"):
             database_url = database_url.replace("postgres://", "postgresql://", 1)
         
         engine = create_engine(database_url)
-        return engine.connect()
+        conn = engine.connect()
+        print("✅ DEBUG: Database connection successful")
+        return conn
     except Exception as e:
-        print(f"PostgreSQL connection failed: {e}")
+        print(f"❌ DEBUG: PostgreSQL connection failed: {e}")
         return None
 
 def init_postgres_db():
@@ -29,6 +32,8 @@ def init_postgres_db():
         if not conn:
             return False
             
+        print("✅ DEBUG: Initializing database tables...")
+        
         # Create users table
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS users (
@@ -60,33 +65,85 @@ def init_postgres_db():
         
         conn.commit()
         conn.close()
+        print("✅ DEBUG: Database tables initialized successfully")
         return True
         
     except Exception as e:
-        print(f"PostgreSQL init failed: {e}")
+        print(f"❌ DEBUG: PostgreSQL init failed: {e}")
         return False
 
 def hash_password(password):
-    """Hash a password for storing"""
-    salt = secrets.token_hex(16)
-    return f"{salt}${hashlib.sha256((salt + password).encode()).hexdigest()}"
+    """Hash a password for storing - IMPROVED VERSION"""
+    try:
+        print(f"🔧 DEBUG: Hashing password for user")
+        salt = secrets.token_hex(16)
+        password_hash = hashlib.sha256((salt + password).encode()).hexdigest()
+        result = f"{salt}${password_hash}"
+        print(f"🔧 DEBUG: Password hashed successfully")
+        return result
+    except Exception as e:
+        print(f"❌ DEBUG: Error hashing password: {e}")
+        return None
 
 def verify_password(stored_password, provided_password):
-    """Verify a stored password against one provided by user"""
-    if not stored_password or '$' not in stored_password:
-        return False
-    salt, hash_value = stored_password.split('$')
-    return hash_value == hashlib.sha256((salt + provided_password).encode()).hexdigest()
-
-def create_user(username, email, password, full_name="", user_type="teacher"):
-    """Create a new user"""
+    """Verify a stored password against one provided by user - IMPROVED VERSION"""
     try:
-        conn = get_db_connection()
-        if not conn:
+        print(f"🔧 DEBUG: Verifying password...")
+        
+        if not stored_password or not provided_password:
+            print("❌ DEBUG: Missing password data")
             return False
             
-        password_hash = hash_password(password)
+        if '$' not in stored_password:
+            print("❌ DEBUG: Invalid stored password format")
+            return False
+            
+        salt, stored_hash = stored_password.split('$')
+        print(f"🔧 DEBUG: Salt: {salt[:10]}..., Stored hash: {stored_hash[:10]}...")
         
+        # Recompute the hash with the provided password
+        computed_hash = hashlib.sha256((salt + provided_password).encode()).hexdigest()
+        print(f"🔧 DEBUG: Computed hash: {computed_hash[:10]}...")
+        
+        # Use constant-time comparison to prevent timing attacks
+        match = secrets.compare_digest(stored_hash, computed_hash)
+        print(f"🔧 DEBUG: Password match: {match}")
+        
+        return match
+    except Exception as e:
+        print(f"❌ DEBUG: Error verifying password: {e}")
+        return False
+
+def create_user(username, email, password, full_name="", user_type="teacher"):
+    """Create a new user - DEBUG VERSION"""
+    try:
+        print(f"🔧 DEBUG: Creating user: {username}, {email}")
+        
+        conn = get_db_connection()
+        if not conn:
+            print("❌ DEBUG: No database connection")
+            return False
+        
+        # Check if user already exists
+        result = conn.execute(text("SELECT id FROM users WHERE username = :username OR email = :email"), {
+            'username': username, 'email': email
+        })
+        existing_user = result.fetchone()
+        if existing_user:
+            print(f"❌ DEBUG: User already exists with ID: {existing_user['id']}")
+            conn.close()
+            return False
+        
+        # Hash password
+        password_hash = hash_password(password)
+        if not password_hash:
+            print("❌ DEBUG: Failed to hash password")
+            conn.close()
+            return False
+        
+        print(f"🔧 DEBUG: Password hash created: {password_hash[:50]}...")
+        
+        # Insert new user
         conn.execute(text("""
             INSERT INTO users (username, email, password_hash, full_name, user_type)
             VALUES (:username, :email, :password_hash, :full_name, :user_type)
@@ -100,16 +157,20 @@ def create_user(username, email, password, full_name="", user_type="teacher"):
         
         conn.commit()
         conn.close()
+        print("✅ DEBUG: User created successfully")
         return True
     except Exception as e:
-        print(f"Error creating user: {e}")
+        print(f"❌ DEBUG: Error creating user: {e}")
         return False
 
 def authenticate_user(username, password):
-    """Authenticate a user"""
+    """Authenticate a user - DEBUG VERSION"""
     try:
+        print(f"🔧 DEBUG: Authenticating user: {username}")
+        
         conn = get_db_connection()
         if not conn:
+            print("❌ DEBUG: No database connection for auth")
             return None
             
         result = conn.execute(text("""
@@ -120,22 +181,39 @@ def authenticate_user(username, password):
         user = result.fetchone()
         conn.close()
         
-        if user and verify_password(user['password_hash'], password):
-            return {
-                'id': user['id'],
-                'username': user['username'],
-                'email': user['email'],
-                'full_name': user['full_name'],
-                'user_type': user['user_type']
-            }
+        print(f"🔧 DEBUG: Database returned user: {user is not None}")
+        
+        if user:
+            print(f"🔧 DEBUG: User found - ID: {user['id']}, Username: {user['username']}")
+            print(f"🔧 DEBUG: Stored hash: {user['password_hash'][:50]}...")
+            
+            password_match = verify_password(user['password_hash'], password)
+            print(f"🔧 DEBUG: Password verification result: {password_match}")
+            
+            if password_match:
+                user_dict = {
+                    'id': user['id'],
+                    'username': user['username'],
+                    'email': user['email'],
+                    'full_name': user['full_name'],
+                    'user_type': user['user_type']
+                }
+                print(f"✅ DEBUG: Authentication successful for user: {user_dict}")
+                return user_dict
+            else:
+                print("❌ DEBUG: Password verification failed")
+        else:
+            print("❌ DEBUG: No user found with that username")
+            
         return None
     except Exception as e:
-        print(f"Error authenticating user: {e}")
+        print(f"❌ DEBUG: Error authenticating user: {e}")
         return None
 
 def create_default_admin():
     """Create default admin account if none exists"""
     try:
+        print("🔧 DEBUG: Checking for default admin...")
         conn = get_db_connection()
         if not conn:
             return
@@ -144,8 +222,15 @@ def create_default_admin():
         count = result.fetchone()['count']
         conn.close()
         
+        print(f"🔧 DEBUG: Current user count: {count}")
+        
         if count == 0:
-            create_user("admin", "admin@hifztracker.com", "admin123", "System Administrator", "teacher")
-            print("Default admin account created: admin / admin123")
+            success = create_user("admin", "admin@hifztracker.com", "admin123", "System Administrator", "teacher")
+            if success:
+                print("✅ Default admin account created: admin / admin123")
+            else:
+                print("❌ Failed to create default admin account")
+        else:
+            print("✅ Users already exist, skipping default admin creation")
     except Exception as e:
         print(f"Error creating default admin: {e}")
