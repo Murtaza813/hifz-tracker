@@ -3,3 +3,5 @@ pandas>=2.0.0
 numpy>=1.24.0
 openpyxl>=3.1.0
 altair>=5.0.0
+gspread>=5.11.0
+oauth2client>=4.1.3
