@@ -1,36 +1,89 @@
 # ============================================================================
-# FILE: database.py - GOOGLE SHEETS VERSION
+# FILE: database.py - GOOGLE SHEETS VERSION (AUTO LOCAL/PRODUCTION)
 # ============================================================================
-# Simple Google Sheets implementation - no SQLite, no PostgreSQL needed!
+# Automatically uses TEST sheet locally, PRODUCTION sheet when deployed!
 
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import streamlit as st
 from datetime import datetime
-import json
+import os
+import time
 
 # Google Sheets Configuration
-SHEET_ID = "1ZkGPICCFMxu_v8x565Zzz30Nljbx73fXaKo1xyXEroQ"
+PRODUCTION_SHEET_ID = "1ZkGPICCFMxu_v8x565Zzz30Nljbx73fXaKo1xyXEroQ"  # Real data (deployed)
+TEST_SHEET_ID = "1He8_sn8I4npcoxw9PrVyQmxKiG-JrAs3cNkfqULzFF0"  # Test data (local)
+
 SCOPE = [
     'https://spreadsheets.google.com/feeds',
     'https://www.googleapis.com/auth/drive'
 ]
 
+def is_running_locally():
+    """Detect if app is running locally or on Streamlit Cloud"""
+    return not os.getenv('STREAMLIT_SHARING_MODE') and not os.getenv('STREAMLIT_SERVER_HEADLESS')
+
+def get_current_sheet_id():
+    """Get the appropriate Sheet ID based on environment"""
+    if is_running_locally():
+        print("🧪 Running LOCALLY - Using TEST database")
+        return TEST_SHEET_ID
+    else:
+        print("🌐 Running on STREAMLIT CLOUD - Using PRODUCTION database")
+        return PRODUCTION_SHEET_ID
+
+import time
+
 def get_google_sheet():
-    """Connect to Google Sheets using credentials from Streamlit secrets"""
-    try:
-        # Get credentials from Streamlit secrets
-        credentials_dict = dict(st.secrets["gcp_service_account"])
-        credentials = ServiceAccountCredentials.from_json_keyfile_dict(
-            credentials_dict, SCOPE
-        )
-        client = gspread.authorize(credentials)
-        spreadsheet = client.open_by_key(SHEET_ID)
-        return spreadsheet
-    except Exception as e:
-        st.error(f"❌ Failed to connect to Google Sheets: {e}")
-        return None
+    """Connect to Google Sheets using credentials from Streamlit secrets with retry logic"""
+    max_retries = 5
+    backoff_factor = 2
+    
+    for attempt in range(max_retries):
+        try:
+            sheet_id = get_current_sheet_id()
+            credentials_dict = dict(st.secrets["gcp_service_account"])
+            credentials = ServiceAccountCredentials.from_json_keyfile_dict(
+                credentials_dict, SCOPE
+            )
+            client = gspread.authorize(credentials)
+            spreadsheet = client.open_by_key(sheet_id)
+            
+            print(f"✅ Google Sheets connected successfully (Attempt {attempt + 1}/{max_retries})")
+            return spreadsheet
+            
+        except gspread.exceptions.APIError as e:
+            error_code = e.response.status_code if hasattr(e, 'response') else None
+            
+            # Check if it's a rate limit error (429)
+            if error_code == 429 and attempt < max_retries - 1:
+                wait_time = backoff_factor ** attempt
+                print(f"⚠️ Rate limited (429). Waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
+                continue
+            else:
+                # Other API errors or final attempt
+                st.error(f"❌ Google Sheets API Error (Code: {error_code}): {str(e)}")
+                if attempt == max_retries - 1:
+                    st.error(f"❌ Failed to connect after {max_retries} attempts")
+                raise e
+                
+        except Exception as e:
+            error_str = str(e).lower()
+            
+            # Check for other rate limit messages
+            if ('quota' in error_str or 'rate limit' in error_str) and attempt < max_retries - 1:
+                wait_time = backoff_factor ** attempt
+                print(f"⚠️ Quota exceeded. Waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
+                continue
+            else:
+                if attempt == max_retries - 1:
+                    st.error(f"❌ Failed to connect after {max_retries} attempts: {str(e)}")
+                raise e
+    
+    return None
 
 def init_db():
     """Initialize Google Sheets with required worksheets"""
@@ -39,7 +92,6 @@ def init_db():
         if not spreadsheet:
             return
         
-        # Create worksheets if they don't exist
         existing_sheets = [ws.title for ws in spreadsheet.worksheets()]
         
         required_sheets = {
@@ -54,30 +106,41 @@ def init_db():
             if sheet_name not in existing_sheets:
                 worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=len(headers))
                 worksheet.update('A1', [headers])
-            
-        print("✅ Google Sheets initialized successfully!")
+        
+        env = "TEST (Local)" if is_running_locally() else "PRODUCTION (Cloud)"
+        print(f"✅ Google Sheets ({env}) initialized successfully!")
         
     except Exception as e:
         print(f"❌ Error initializing sheets: {e}")
 
 def get_all_students():
-    """Get all students from Google Sheets"""
-    try:
-        spreadsheet = get_google_sheet()
-        if not spreadsheet:
-            return {}
-        
-        worksheet = spreadsheet.worksheet('students')
-        data = worksheet.get_all_records()
-        
-        if not data:
-            return {}
-        
-        return {row['name']: row['id'] for row in data}
+    """Get all students from Google Sheets with retry logic"""
+    max_retries = 3
     
-    except Exception as e:
-        print(f"❌ Error getting students: {e}")
-        return {}
+    for attempt in range(max_retries):
+        try:
+            spreadsheet = get_google_sheet()
+            if not spreadsheet:
+                return {}
+            
+            worksheet = spreadsheet.worksheet('students')
+            data = worksheet.get_all_records()
+            
+            if not data:
+                return {}
+            
+            return {row['name']: row['id'] for row in data}
+        
+        except gspread.exceptions.APIError as e:
+            if hasattr(e, 'response') and e.response.status_code == 429:
+                wait_time = 2 ** attempt
+                print(f"Rate limited loading students. Waiting {wait_time}s...")
+                time.sleep(wait_time)
+                continue
+            print(f"❌ Error getting students: {e}")
+            return {}
+    
+    return {}
 
 def student_exists(name):
     """Check if student exists"""
@@ -85,117 +148,107 @@ def student_exists(name):
     return name in students
 
 def save_student_from_excel(parsed_data):
-    """Save student and sessions from Excel file"""
-    try:
-        if 'error' in parsed_data and parsed_data['error']:
-            return None
-        
-        student_info = parsed_data['student_info']
-        student_name = student_info['Student_Name'].iloc[0]
-        teacher_name = student_info.get('Teacher_Name', pd.Series(['Unknown'])).iloc[0]
-        
-        # Get or create student
-        students = get_all_students()
-        
-        if student_name in students:
-            student_id = students[student_name]
-        else:
-            # Create new student
-            spreadsheet = get_google_sheet()
-            students_ws = spreadsheet.worksheet('students')
-            
-            existing_data = students_ws.get_all_values()
-            new_id = len(existing_data)  # Simple ID generation
-            
-            new_row = [
-                new_id,
-                student_name,
-                teacher_name,
-                datetime.now().strftime('%Y-%m-%d'),
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            ]
-            students_ws.append_row(new_row)
-            student_id = new_id
-        
-        # Save sessions
-        sessions_ws = spreadsheet.worksheet('sessions')
-        existing_sessions = sessions_ws.get_all_values()
-        next_session_id = len(existing_sessions)
-        
-        for session_type in ['murajaat', 'juzhali', 'jadeed']:
-            df = parsed_data[session_type]
-            if df.empty:
-                continue
-            
-            for _, row in df.iterrows():
-                session_row = [
-                    next_session_id,
-                    student_id,
-                    session_type.capitalize(),
-                    pd.Timestamp(row.get('date')).strftime('%Y-%m-%d'),
-                    row.get('sipara', ''),
-                    row.get('page_tested', row.get('page_count', '')),
-                    row.get('jadeed_page', ''),
-                    row.get('ending_ayah', ''),
-                    row.get('talqeen_count', 0),
-                    row.get('tambeeh_count', 0),
-                    row.get('core_mistake_type', ''),
-                    row.get('specific_mistake', ''),
-                    row.get('overall_grade', ''),
-                    row.get('notes', ''),
-                    parsed_data['format'],
-                    datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                ]
-                sessions_ws.append_row(session_row)
-                next_session_id += 1
-        
-        return student_id
+    """Save student and sessions from Excel file with retry logic"""
+    max_retries = 3
     
-    except Exception as e:
-        print(f"❌ Error saving student: {e}")
-        return None
+    for attempt in range(max_retries):
+        try:
+            # ... [keep all your existing code up to the batch upload section] ...
+            
+            # Write all rows at once (BATCH UPLOAD - 1 API call instead of 247!)
+            if all_session_rows:
+                st.sidebar.info(f"📤 Uploading {len(all_session_rows)} sessions in batch (Attempt {attempt + 1}/{max_retries})...")
+                
+                # Add retry for the batch upload
+                for upload_attempt in range(3):
+                    try:
+                        sessions_ws.append_rows(all_session_rows, value_input_option='USER_ENTERED')
+                        st.sidebar.success(f"✅ Saved {len(all_session_rows)} sessions for student {student_name}")
+                        return student_id
+                    except gspread.exceptions.APIError as e:
+                        if hasattr(e, 'response') and e.response.status_code == 429:
+                            wait_time = 2 ** upload_attempt
+                            st.sidebar.warning(f"Upload rate limited. Waiting {wait_time}s...")
+                            time.sleep(wait_time)
+                            continue
+                        raise e
+                
+            else:
+                st.sidebar.warning("⚠️ No sessions to save")
+            
+            return student_id
+        
+        except gspread.exceptions.APIError as e:
+            if hasattr(e, 'response') and e.response.status_code == 429:
+                wait_time = 2 ** attempt
+                st.sidebar.warning(f"Rate limited overall. Waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
+                continue
+            st.sidebar.error(f"❌ Error in save_student_from_excel: {str(e)}")
+            import traceback
+            st.sidebar.code(traceback.format_exc())
+            return None
+    
+    return None
 
 def get_all_student_sessions(student_id):
-    """Get all sessions for a student"""
-    try:
-        spreadsheet = get_google_sheet()
-        if not spreadsheet:
-            return pd.DataFrame()
-        
-        worksheet = spreadsheet.worksheet('sessions')
-        data = worksheet.get_all_records()
-        
-        if not data:
-            return pd.DataFrame()
-        
-        df = pd.DataFrame(data)
-        df = df[df['student_id'] == student_id]
-        
-        # Standardize column names
-        df = df.rename(columns={
-            'session_type': 'Session_Type',
-            'date': 'Date',
-            'sipara': 'Sipara',
-            'page': 'Page',
-            'jadeed_page': 'Jadeed_Page',
-            'ending_ayah': 'Ending_Ayah',
-            'talqeen_count': 'Mistake_Count',
-            'tambeeh_count': 'Tambeeh_Count',
-            'core_mistake': 'Core_Mistake',
-            'specific_mistake': 'Specific_Mistake',
-            'overall_grade': 'Overall_Grade',
-            'notes': 'Notes',
-            'data_format': 'Data_Format'
-        })
-        
-        df['Date'] = pd.to_datetime(df['Date'])
-        df = df.sort_values('Date', ascending=False)
-        
-        return df
+    """Get all sessions for a student - UPDATED TO HANDLE EMPTY GRADES with retry"""
+    max_retries = 3
     
-    except Exception as e:
-        print(f"❌ Error getting sessions: {e}")
-        return pd.DataFrame()
+    for attempt in range(max_retries):
+        try:
+            spreadsheet = get_google_sheet()
+            if not spreadsheet:
+                return pd.DataFrame()
+            
+            worksheet = spreadsheet.worksheet('sessions')
+            data = worksheet.get_all_records()
+            
+            if not data:
+                return pd.DataFrame()
+            
+            df = pd.DataFrame(data)
+            df = df[df['student_id'] == student_id]
+            
+            # Standardize column names
+            df = df.rename(columns={
+                'session_type': 'Session_Type',
+                'date': 'Date',
+                'sipara': 'Sipara',
+                'page': 'Page',
+                'jadeed_page': 'Jadeed_Page',
+                'ending_ayah': 'Ending_Ayah',
+                'talqeen_count': 'Mistake_Count',
+                'tambeeh_count': 'Tambeeh_Count',
+                'core_mistake': 'Core_Mistake',
+                'specific_mistake': 'Specific_Mistake',
+                'overall_grade': 'Overall_Grade',
+                'notes': 'Notes',
+                'data_format': 'Data_Format'
+            })
+            
+            # ✅ ADD THIS: Convert empty strings to None for Overall_Grade
+            df['Overall_Grade'] = df['Overall_Grade'].replace('', None)
+            
+            # Convert numeric columns
+            df['Mistake_Count'] = pd.to_numeric(df['Mistake_Count'], errors='coerce').fillna(0)
+            df['Tambeeh_Count'] = pd.to_numeric(df['Tambeeh_Count'], errors='coerce').fillna(0)
+            
+            df['Date'] = pd.to_datetime(df['Date'])
+            df = df.sort_values('Date', ascending=False)
+            
+            return df
+        
+        except gspread.exceptions.APIError as e:
+            if hasattr(e, 'response') and e.response.status_code == 429:
+                wait_time = 2 ** attempt
+                print(f"Rate limited loading sessions. Waiting {wait_time}s...")
+                time.sleep(wait_time)
+                continue
+            print(f"❌ Error getting sessions: {e}")
+            return pd.DataFrame()
+    
+    return pd.DataFrame()
 
 def get_student_data(student_id):
     """Get all data for a student by type"""
