@@ -153,8 +153,107 @@ def save_student_from_excel(parsed_data):
     
     for attempt in range(max_retries):
         try:
-            # ... [keep all your existing code up to the batch upload section] ...
+            # Validate parsed data
+            if not parsed_data or 'error' in parsed_data and parsed_data['error']:
+                st.sidebar.error(f"❌ Parsed data error: {parsed_data.get('error', 'Unknown error')}")
+                return None
             
+            # Extract student info
+            if 'student_info' not in parsed_data:
+                st.sidebar.error("❌ No student_info in parsed_data")
+                return None
+                
+            student_info = parsed_data['student_info']
+            
+            # Get student name
+            if 'Student_Name' not in student_info.columns or student_info.empty:
+                st.sidebar.error("❌ No Student_Name found")
+                return None
+                
+            student_name = student_info['Student_Name'].iloc[0]
+            teacher_name = student_info.get('Teacher_Name', pd.Series(['Unknown'])).iloc[0] if 'Teacher_Name' in student_info.columns else 'Unknown'
+            
+            st.sidebar.info(f"📝 Processing student: {student_name}")
+            
+            # Get spreadsheet connection
+            spreadsheet = get_google_sheet()
+            if not spreadsheet:
+                st.sidebar.error("❌ Failed to connect to spreadsheet")
+                return None
+            
+            st.sidebar.success(f"✅ Connected to sheet: {spreadsheet.title}")
+            
+            # Get or create student
+            students = get_all_students()
+            
+            if student_name in students:
+                student_id = students[student_name]
+                st.sidebar.info(f"✅ Found existing student with ID: {student_id}")
+            else:
+                # Create new student
+                st.sidebar.info("📝 Creating new student...")
+                students_ws = spreadsheet.worksheet('students')
+                existing_data = students_ws.get_all_values()
+                new_id = len(existing_data)
+                
+                new_row = [
+                    new_id,
+                    student_name,
+                    teacher_name,
+                    datetime.now().strftime('%Y-%m-%d'),
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                ]
+                students_ws.append_row(new_row)
+                student_id = new_id
+                st.sidebar.success(f"✅ Created new student with ID: {student_id}")
+            
+            # Save sessions - BATCH VERSION (FIXED!)
+            st.sidebar.info("💾 Preparing sessions for batch upload...")
+            sessions_ws = spreadsheet.worksheet('sessions')
+            existing_sessions = sessions_ws.get_all_values()
+            next_session_id = len(existing_sessions)
+            
+            # ✅ CRITICAL: Initialize the list BEFORE any conditions
+            all_session_rows = []
+            
+            for session_type in ['murajaat', 'juzhali', 'jadeed']:
+                if session_type not in parsed_data:
+                    continue
+                    
+                df = parsed_data[session_type]
+                if df.empty:
+                    continue
+                
+                for _, row in df.iterrows():
+                    # Convert NaN values to empty strings or appropriate defaults
+                    def clean_value(val, default=''):
+                        """Convert NaN/None to default value"""
+                        if pd.isna(val) or val is None:
+                            return default
+                        return val
+                    
+                    session_row = [
+                        next_session_id,
+                        student_id,
+                        session_type.capitalize(),
+                        pd.Timestamp(row.get('date')).strftime('%Y-%m-%d') if pd.notna(row.get('date')) else datetime.now().strftime('%Y-%m-%d'),
+                        clean_value(row.get('sipara'), ''),
+                        clean_value(row.get('page_tested', row.get('page_count')), ''),
+                        clean_value(row.get('jadeed_page'), ''),
+                        clean_value(row.get('ending_ayah'), ''),
+                        clean_value(row.get('talqeen_count'), 0),
+                        clean_value(row.get('tambeeh_count'), 0),
+                        clean_value(row.get('core_mistake_type'), ''),
+                        clean_value(row.get('specific_mistake'), ''),
+                        clean_value(row.get('overall_grade'), ''),
+                        clean_value(row.get('notes'), ''),
+                        parsed_data.get('format', 'upload'),
+                        datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    ]
+                    all_session_rows.append(session_row)
+                    next_session_id += 1
+            
+            # ✅ Now all_session_rows is guaranteed to be defined
             # Write all rows at once (BATCH UPLOAD - 1 API call instead of 247!)
             if all_session_rows:
                 st.sidebar.info(f"📤 Uploading {len(all_session_rows)} sessions in batch (Attempt {attempt + 1}/{max_retries})...")
@@ -175,9 +274,8 @@ def save_student_from_excel(parsed_data):
                 
             else:
                 st.sidebar.warning("⚠️ No sessions to save")
+                return student_id
             
-            return student_id
-        
         except gspread.exceptions.APIError as e:
             if hasattr(e, 'response') and e.response.status_code == 429:
                 wait_time = 2 ** attempt
@@ -188,6 +286,17 @@ def save_student_from_excel(parsed_data):
             import traceback
             st.sidebar.code(traceback.format_exc())
             return None
+        
+        except Exception as e:
+            if attempt == max_retries - 1:
+                st.sidebar.error(f"❌ Error after {max_retries} attempts: {str(e)}")
+                import traceback
+                st.sidebar.code(traceback.format_exc())
+            else:
+                wait_time = 2 ** attempt
+                st.sidebar.warning(f"Error occurred. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+                continue
     
     return None
 
