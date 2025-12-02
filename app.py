@@ -11,7 +11,6 @@ import io
 import re
 import altair as alt
 
-# DATABASE IMPORTS
 from database import (
     init_db, 
     get_all_students, 
@@ -21,7 +20,8 @@ from database import (
     student_exists,
     save_student_from_excel,
     get_data_format_info,
-    get_last_jadeed_page
+    get_last_jadeed_page,
+    get_google_sheet  # ← ADD THIS
 )
 from excel_handler import (
     parse_excel_file, 
@@ -717,7 +717,7 @@ def calculate_jadeed_progress(all_jadeed_data):
 # =========================================================================
 
 # =========================================================================
-# ANALYTICS DASHBOARD FUNCTION
+# ANALYTICS DASHBOARD FUNCTION - FIXED VERSION
 # =========================================================================
 
 def run_analytics_dashboard(student_id):
@@ -806,18 +806,36 @@ def run_analytics_dashboard(student_id):
     # Health scores
     st.markdown('<div class="section-header">💪 Health Scores</div>', unsafe_allow_html=True)
     
-    # Calculate health scores
+    # Calculate health scores - USING MARK-BASED CALCULATION FOR MURAJAAT
     if not new_format_data.empty:
-        # New format: Talqeen/Tambeeh
+        # ✅ UPDATED: Murajaat health based on overall session marks
         mura_data = df[df['Session_Type'] == 'Murajaat']
-        if not mura_data.empty and 'Mistake_Count' in mura_data.columns and 'Tambeeh_Count' in mura_data.columns:
-            mura_total = mura_data['Mistake_Count'].sum() + mura_data['Tambeeh_Count'].sum()
-            mura_talqeen = mura_data['Mistake_Count'].sum()
-            mura_health = 100 * (1 - (mura_talqeen / mura_total)) if mura_total > 0 else None
+        
+        # Look for overall session marks (Session_Summary entries)
+        mura_marks_data = mura_data[
+            (mura_data['Core_Mistake'] == 'Session_Summary') & 
+            (mura_data['Overall_Grade'].notna())
+        ]
+        
+        if not mura_marks_data.empty:
+            # Convert marks to numeric (they should already be 1-10)
+            mura_marks = pd.to_numeric(mura_marks_data['Overall_Grade'], errors='coerce').dropna()
+            
+            if not mura_marks.empty:
+                avg_mark = mura_marks.mean()
+                mura_health = (avg_mark / 10) * 100  # Convert mark to percentage
+            else:
+                mura_health = None
         else:
-            mura_health = None
+            # Fallback: Use old Talqeen/Tambeeh calculation if no marks available
+            if 'Mistake_Count' in mura_data.columns and 'Tambeeh_Count' in mura_data.columns:
+                mura_total = mura_data['Mistake_Count'].sum() + mura_data['Tambeeh_Count'].sum()
+                mura_talqeen = mura_data['Mistake_Count'].sum()
+                mura_health = 100 * (1 - (mura_talqeen / mura_total)) if mura_total > 0 else None
+            else:
+                mura_health = None
 
-        # UPDATED: Juzhali health for NEW FORMAT - Use Session_Summary grades (with error handling)
+        # ✅ UPDATED: Juzhali health for NEW FORMAT - Use Session_Summary grades
         juzhali_data = df[df['Session_Type'] == 'Juzhali']
         
         # Check if Core_Mistake column exists before using it
@@ -856,23 +874,17 @@ def run_analytics_dashboard(student_id):
         else:
             mura_health = None
 
-        # UPDATED: Juzhali health for OLD FORMAT - Use Session_Summary grades (with error handling)
+        # ✅ FIXED: Juzhali health for OLD FORMAT - Look for ALL Juzhali grades (not just Session_Summary)
         juzhali_data = df[df['Session_Type'] == 'Juzhali']
         
-        # Check if Core_Mistake column exists before using it
-        if 'Core_Mistake' in juzhali_data.columns:
-            session_summary_data = juzhali_data[
-                (juzhali_data['Core_Mistake'] == 'Session_Summary') & 
-                (juzhali_data['Overall_Grade'].notna())
-            ]
-        else:
-            # If Core_Mistake doesn't exist, look for any Juzhali sessions with Overall_Grade
-            session_summary_data = juzhali_data[juzhali_data['Overall_Grade'].notna()]
-
-        if not session_summary_data.empty:
-            valid_juzhali_grades = session_summary_data['Overall_Grade'].dropna()
+        if not juzhali_data.empty and 'Overall_Grade' in juzhali_data.columns:
+            # Get ALL Juzhali grades (not just Session_Summary entries)
+            valid_juzhali_grades = juzhali_data['Overall_Grade'].dropna()
+            
             if not valid_juzhali_grades.empty:
+                # Convert Arabic grades to numeric
                 juzhali_grades = valid_juzhali_grades.apply(grade_to_numeric).dropna()
+                
                 if not juzhali_grades.empty:
                     avg_grade = juzhali_grades.mean()
                     juzhali_health = (avg_grade / 10) * 100
@@ -1165,82 +1177,11 @@ def get_murajaat_available_pages(student_data):
 
 
 # =========================================================================
-# MURAJAAT ASSISTANT FUNCTION
-# =========================================================================
-
-def get_murajaat_available_pages(student_data):
-    """
-    Determine which pages are available for Murajaat based on Jadeed/Juzhali progression.
-    
-    Returns a dict: {sipara_number: [list of available pages]}
-    
-    Logic:
-    - Get last Jadeed page to determine current sipara and page
-    - Calculate Juzhali range (10 pages before Jadeed)
-    - Pages BEFORE Juzhali = graduated to Murajaat
-    - Completed siparas = all 20 pages available
-    """
-    
-    # Get last Jadeed session
-    last_jadeed_page = get_last_jadeed_page(student_data)
-    
-    if last_jadeed_page is None:
-        # No Jadeed yet, no Murajaat pages available
-        return {}
-    
-    # Determine which sipara the last Jadeed page belongs to
-    # Each sipara has 20 pages: Sipara 1 = pages 1-20, Sipara 2 = 21-40, etc.
-    current_jadeed_sipara = ((last_jadeed_page - 1) // 20) + 1
-    current_jadeed_page_in_sipara = ((last_jadeed_page - 1) % 20) + 1
-    
-    # Calculate Juzhali range
-    juzhali_length = st.session_state.get('juzhali_length', 10)
-    juzhali_end_absolute = last_jadeed_page
-    juzhali_start_absolute = max(1, juzhali_end_absolute - juzhali_length + 1)
-    
-    # Determine which sipara Juzhali starts in
-    juzhali_start_sipara = ((juzhali_start_absolute - 1) // 20) + 1
-    juzhali_start_page_in_sipara = ((juzhali_start_absolute - 1) % 20) + 1
-    
-    murajaat_pages = {}
-    
-    # 1. Add all COMPLETED siparas (all 20 pages available)
-    for sipara in range(1, juzhali_start_sipara):
-        murajaat_pages[str(sipara)] = list(range(1, 21))
-    
-    # 2. If Juzhali starts in a different sipara than Jadeed, 
-    #    add pages from Juzhali's sipara that are BEFORE Juzhali window
-    if juzhali_start_sipara < current_jadeed_sipara:
-        # Pages in the Juzhali start sipara that are BEFORE Juzhali
-        if juzhali_start_page_in_sipara > 1:
-            murajaat_pages[str(juzhali_start_sipara)] = list(range(1, juzhali_start_page_in_sipara))
-        
-        # All pages from siparas BETWEEN Juzhali start and current Jadeed sipara
-        for sipara in range(juzhali_start_sipara + 1, current_jadeed_sipara):
-            murajaat_pages[str(sipara)] = list(range(1, 21))
-        
-        # Pages in the CURRENT Jadeed sipara that are BEFORE Juzhali
-        if current_jadeed_sipara == current_jadeed_sipara and juzhali_start_page_in_sipara > 1:
-            # This means Juzhali is within the same sipara
-            graduated_pages_in_current = list(range(1, juzhali_start_page_in_sipara))
-            if graduated_pages_in_current:
-                murajaat_pages[str(current_jadeed_sipara)] = graduated_pages_in_current
-    
-    # 3. If Juzhali is within the SAME sipara as Jadeed
-    elif juzhali_start_sipara == current_jadeed_sipara:
-        # Pages BEFORE Juzhali window in the current sipara
-        if juzhali_start_page_in_sipara > 1:
-            murajaat_pages[str(current_jadeed_sipara)] = list(range(1, juzhali_start_page_in_sipara))
-    
-    return murajaat_pages
-
-
-# =========================================================================
-# MURAJAAT ASSISTANT FUNCTION
+# MURAJAAT ASSISTANT FUNCTION - WITH OVERALL SESSION MARKS
 # =========================================================================
 
 def run_murajaat_assistant(student_data_df, student_id):
-    """Murajaat assistant for long-term review of graduated pages"""
+    """Murajaat assistant for long-term review of graduated pages WITH OVERALL MARKS"""
     
     if student_data_df is None or student_data_df.empty:
         st.error("❌ No student data available.")
@@ -1355,15 +1296,24 @@ def run_murajaat_assistant(student_data_df, student_id):
                 st.metric("Total Mistakes", "N/A")
         
         with col3:
+            # Check for Overall_Grade (which stores marks 1-10 for Murajaat)
             if 'Overall_Grade' in sipara_data.columns:
-                valid_grades = sipara_data['Overall_Grade'].dropna()
-                if not valid_grades.empty:
-                    avg_grade = valid_grades.mean()
-                    st.metric("Avg Grade", f"{avg_grade:.1f}/10")
+                # Filter for Session_Summary entries only (these have the marks)
+                summary_data = sipara_data[sipara_data['Core_Mistake'] == 'Session_Summary']
+                valid_marks = summary_data['Overall_Grade'].dropna()
+                
+                if not valid_marks.empty:
+                    # Convert to numeric and calculate average mark
+                    marks_numeric = pd.to_numeric(valid_marks, errors='coerce').dropna()
+                    if not marks_numeric.empty:
+                        avg_mark = marks_numeric.mean()
+                        st.metric("Avg Mark", f"{avg_mark:.1f}/10")
+                    else:
+                        st.metric("Avg Mark", "N/A")
                 else:
-                    st.metric("Avg Grade", "N/A")
+                    st.metric("Avg Mark", "N/A")
             else:
-                st.metric("Avg Grade", "N/A")
+                st.metric("Avg Mark", "N/A")
     
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1759,13 +1709,130 @@ def run_murajaat_assistant(student_data_df, student_id):
                 }
         
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("💾 Submit All Pages", type="primary", use_container_width=True):
-            # Save logic here
-            st.session_state.mura_session_started = False
-            st.session_state.mura_page_entries = {}
-            st.success(f"✅ Successfully recorded session for {len(st.session_state.mura_selected_pages)} pages!")
-            st.balloons()
-            #st.rerun()
+        
+            # =========================================================================
+        # ✅ NEW: OVERALL SESSION MARK SECTION (for Murajaat)
+        # =========================================================================
+        st.markdown('<div class="section-header">🎯 Overall Session Mark</div>', unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); 
+                    padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+            <h4 style="color: #92400e; margin: 0 0 10px 0;">📊 Session Performance Summary</h4>
+            <p style="color: #78350f; margin: 0;">
+                Based on today's Murajaat performance across all pages, provide an overall mark (1-10).
+                This mark will be used to calculate your Murajaat Health Score.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            overall_mark = st.slider(
+                "Overall Session Mark (1-10)",
+                min_value=1,
+                max_value=10,
+                value=7,
+                help="Overall evaluation of today's Murajaat session",
+                key="mura_overall_mark_slider"  # ✅ Different key
+            )
+        
+        with col2:
+            # Show what this mark means for health score
+            mark_to_health = {
+                10: "100%",
+                9: "90%",
+                8: "80%",
+                7: "70%",
+                6: "60%",
+                5: "50%",
+                4: "40%",
+                3: "30%",
+                2: "20%",
+                1: "10%"
+            }
+            st.markdown(f"""
+            <div style="background: rgba(251, 191, 36, 0.2); 
+                        padding: 15px; border-radius: 8px; text-align: center;
+                        border: 2px solid #fbbf24;">
+                <p style="margin: 0; color: #92400e; font-size: 0.9em;">Health Impact</p>
+                <h3 style="margin: 5px 0 0 0; color: #d97706;">{mark_to_health[overall_mark]}</h3>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Session notes
+        session_notes = st.text_area(
+            "Session Notes (Optional)",
+            placeholder="Any observations about today's Murajaat session...",
+            height=80,
+            key="mura_session_notes_input"  # ✅ Different key
+        )
+        
+        # Store overall mark in session state
+        st.session_state.mura_overall_mark = overall_mark
+        st.session_state.mura_session_notes = session_notes
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # =========================================================================
+        # ✅ UPDATED SUBMIT BUTTON - SAVES OVERALL MARK
+        # =========================================================================
+        if st.button("💾 Submit Complete Session", type="primary", use_container_width=True):
+            # Save logic
+            try:
+                from database import append_new_session
+                
+                # Save individual page entries
+                for page_num, page_data in st.session_state.mura_page_entries.items():
+                    session_data = {
+                        'date': st.session_state.mura_session_date,
+                        'sipara': st.session_state.mura_current_sipara,
+                        'page_tested': page_num,
+                        'talqeen_count': page_data['talqeen'],
+                        'tambeeh_count': page_data['tambeeh'],
+                        'core_mistake_type': page_data['core_mistake'],
+                        'specific_mistake': page_data['specific_mistake'],
+                        'overall_grade': None,  # Individual pages don't get marks
+                        'notes': f"Page {page_num} - {st.session_state.mura_session_notes}" if st.session_state.mura_session_notes else f"Page {page_num}"
+                    }
+                    
+                    # Save each page entry
+                    append_new_session(student_id, st.session_state.mura_session_type, session_data)
+                
+                # ✅ Save OVERALL SESSION with mark
+                overall_session_data = {
+                    'date': st.session_state.mura_session_date,
+                    'sipara': st.session_state.mura_current_sipara,
+                    'page_tested': f"Pages {', '.join(st.session_state.mura_selected_pages)}",
+                    'talqeen_count': 0,
+                    'tambeeh_count': 0,
+                    'core_mistake_type': 'Session_Summary',
+                    'specific_mistake': 'Overall Session Evaluation',
+                    'overall_grade': st.session_state.mura_overall_mark,  # ✅ Save the mark!
+                    'notes': st.session_state.mura_session_notes or "Murajaat session completed"
+                }
+                
+                append_new_session(student_id, st.session_state.mura_session_type, overall_session_data)
+                
+                # Reset session state
+                st.session_state.mura_session_started = False
+                st.session_state.mura_page_entries = {}
+                st.session_state.mura_overall_mark = None
+                st.session_state.mura_session_notes = None
+                
+                st.success(f"✅ Successfully recorded Murajaat session for {len(st.session_state.mura_selected_pages)} pages with mark: {st.session_state.mura_overall_mark}/10!")
+                st.balloons()
+                
+                # Auto-refresh
+                import time
+                with st.spinner("Refreshing in 3 seconds..."):
+                    time.sleep(3)
+                
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"❌ Error saving session: {str(e)}")
 
 # =========================================================================
 # END OF PART 3
@@ -1957,29 +2024,80 @@ def run_juzhali_assistant(student_data_df, student_id):
                 </div>
                 """, unsafe_allow_html=True)
         else:
-            # Fallback to old calculation if no overall grades
-            tot = juzhali_data['Mistake_Count'].sum()
-            tal = juzhali_data[juzhali_data['Mistake_Type'] == 'Talqeen']['Mistake_Count'].sum()
-            score = 100 * (1 - (tal / tot)) if tot > 0 else 100
-            
-            health_class = get_health_color_class(score)
-            health_msg = get_health_message(score)
-            
-            st.markdown(f"""
-            <div class="health-card {health_class}">
-                <h2 style="margin: 0 0 15px 0;">Juzhali Retention Health</h2>
-                <h1 style="margin: 0; font-size: 3.5em;">{score:.1f}%</h1>
-                <p style="margin: 15px 0 0 0; font-size: 1.3em; font-weight: bold;">{health_msg}</p>
-                <div style="background: rgba(255,255,255,0.3); border-radius: 10px; height: 15px; 
-                            margin-top: 20px; overflow: hidden;">
-                    <div style="background: white; height: 100%; width: {score}%; 
-                                transition: width 0.5s ease;"></div>
+            # ✅ FIXED: Check if columns exist before using them
+            if 'Mistake_Type' in juzhali_data.columns and 'Mistake_Count' in juzhali_data.columns:
+                # New format: Use Talqeen/Tambeeh calculation
+                tot = juzhali_data['Mistake_Count'].sum()
+                tal = juzhali_data[juzhali_data['Mistake_Type'] == 'Talqeen']['Mistake_Count'].sum()
+                score = 100 * (1 - (tal / tot)) if tot > 0 else 100
+                
+                health_class = get_health_color_class(score)
+                health_msg = get_health_message(score)
+                
+                st.markdown(f"""
+                <div class="health-card {health_class}">
+                    <h2 style="margin: 0 0 15px 0;">Juzhali Retention Health</h2>
+                    <h1 style="margin: 0; font-size: 3.5em;">{score:.1f}%</h1>
+                    <p style="margin: 15px 0 0 0; font-size: 1.3em; font-weight: bold;">{health_msg}</p>
+                    <div style="background: rgba(255,255,255,0.3); border-radius: 10px; height: 15px; 
+                                margin-top: 20px; overflow: hidden;">
+                        <div style="background: white; height: 100%; width: {score}%; 
+                                    transition: width 0.5s ease;"></div>
+                    </div>
+                    <p style="margin: 15px 0 0 0; font-size: 0.95em; opacity: 0.9;">
+                        Total: {int(tot)} mistakes • Talqeen: {int(tal)} • Based on {len(juzhali_data)} sessions
+                    </p>
                 </div>
-                <p style="margin: 15px 0 0 0; font-size: 0.95em; opacity: 0.9;">
-                    Total: {int(tot)} mistakes • Talqeen: {int(tal)} • Based on {len(juzhali_data)} sessions
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
+            else:
+                # Old format: Use grade-based calculation (for uploaded data)
+                if 'Overall_Grade' in juzhali_data.columns:
+                    valid_grades = juzhali_data['Overall_Grade'].dropna()
+                    if not valid_grades.empty:
+                        juzhali_grades = valid_grades.apply(grade_to_numeric).dropna()
+                        if not juzhali_grades.empty:
+                            avg_grade = juzhali_grades.mean()
+                            score = (avg_grade / 10) * 100
+                            
+                            health_class = get_health_color_class(score)
+                            health_msg = get_health_message(score)
+                            
+                            st.markdown(f"""
+                            <div class="health-card {health_class}">
+                                <h2 style="margin: 0 0 15px 0;">Juzhali Retention Health</h2>
+                                <h1 style="margin: 0; font-size: 3.5em;">{score:.1f}%</h1>
+                                <p style="margin: 15px 0 0 0; font-size: 1.3em; font-weight: bold;">{health_msg}</p>
+                                <div style="background: rgba(255,255,255,0.3); border-radius: 10px; height: 15px; 
+                                            margin-top: 20px; overflow: hidden;">
+                                    <div style="background: white; height: 100%; width: {score}%; 
+                                                transition: width 0.5s ease;"></div>
+                                </div>
+                                <p style="margin: 15px 0 0 0; font-size: 0.95em; opacity: 0.9;">
+                                    Based on {len(juzhali_grades)} session grades • Average: {avg_grade:.1f}/10
+                                </p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.markdown("""
+                            <div class="info-section">
+                                <h3 style="margin: 0 0 10px 0;">📊 No Valid Grades</h3>
+                                <p style="margin: 0;">Start recording sessions to see health scores!</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    else:
+                        st.markdown("""
+                        <div class="info-section">
+                            <h3 style="margin: 0 0 10px 0;">📊 No Grades Available</h3>
+                            <p style="margin: 0;">Start recording sessions to see health scores!</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div class="info-section">
+                        <h3 style="margin: 0 0 10px 0;">📊 No Data Available</h3>
+                        <p style="margin: 0;">Start recording Juzhali sessions to see health scores!</p>
+                    </div>
+                    """, unsafe_allow_html=True)
     
     st.markdown("<br>", unsafe_allow_html=True)
     
@@ -2002,24 +2120,61 @@ def run_juzhali_assistant(student_data_df, student_id):
             font_color = "#9ca3af"
             mistake_summary = "Not tested"
         else:
-            talqeen_sum = p_data[p_data['Mistake_Type'] == 'Talqeen']['Mistake_Count'].sum()
-            tambeeh_sum = p_data[p_data['Mistake_Type'] == 'Tambeeh']['Mistake_Count'].sum()
-            
-            if talqeen_sum > 0:
-                status = "critical"
-                color_code = "#fee2e2"
-                font_color = "#dc2626"
-                mistake_summary = f"{int(talqeen_sum)} Tal / {int(tambeeh_sum)} Tam"
-            elif tambeeh_sum >= 3:
-                status = "weak"
-                color_code = "#fef3c7"
-                font_color = "#d97706"
-                mistake_summary = f"{int(tambeeh_sum)} Tam"
+            # ✅ FIXED: Check if columns exist before using them
+            if 'Mistake_Type' in p_data.columns and 'Mistake_Count' in p_data.columns:
+                talqeen_sum = p_data[p_data['Mistake_Type'] == 'Talqeen']['Mistake_Count'].sum()
+                tambeeh_sum = p_data[p_data['Mistake_Type'] == 'Tambeeh']['Mistake_Count'].sum()
+                
+                if talqeen_sum > 0:
+                    status = "critical"
+                    color_code = "#fee2e2"
+                    font_color = "#dc2626"
+                    mistake_summary = f"{int(talqeen_sum)} Tal / {int(tambeeh_sum)} Tam"
+                elif tambeeh_sum >= 3:
+                    status = "weak"
+                    color_code = "#fef3c7"
+                    font_color = "#d97706"
+                    mistake_summary = f"{int(tambeeh_sum)} Tam"
+                else:
+                    status = "good"
+                    color_code = "#d1fae5"
+                    font_color = "#059669"
+                    mistake_summary = "Good ✓"
             else:
-                status = "good"
-                color_code = "#d1fae5"
-                font_color = "#059669"
-                mistake_summary = "Good ✓"
+                # Fallback: Use grade-based status for uploaded data
+                grade_column = None
+                for col in ['Mark', 'Overall_Grade', 'Final_Grade']:
+                    if col in p_data.columns and not p_data[col].isna().all():
+                        grade_column = col
+                        break
+                
+                if grade_column:
+                    p_data_copy = p_data.copy()
+                    p_data_copy['grade_numeric'] = p_data_copy[grade_column].apply(grade_to_numeric)
+                    p_data_copy = p_data_copy.dropna(subset=['grade_numeric'])
+                    
+                    if not p_data_copy.empty:
+                        avg_mark = p_data_copy['grade_numeric'].mean()
+                    else:
+                        avg_mark = 10
+                else:
+                    avg_mark = 10
+                    
+                if avg_mark <= 7:
+                    status = "critical"
+                    color_code = "#fee2e2"
+                    font_color = "#dc2626"
+                    mistake_summary = f"Grade: {avg_mark:.1f}"
+                elif avg_mark <= 8:
+                    status = "weak"
+                    color_code = "#fef3c7"
+                    font_color = "#d97706"
+                    mistake_summary = f"Grade: {avg_mark:.1f}"
+                else:
+                    status = "good"
+                    color_code = "#d1fae5"
+                    font_color = "#059669"
+                    mistake_summary = f"Grade: {avg_mark:.1f}"
         
         page_health_map[page_num] = {
             "status": status,
@@ -2359,7 +2514,7 @@ def run_jadeed_assistant(student_data_df, student_id):
             with col1:
                 if not jadeed_data_sorted.empty:
                     last_jadeed_date = jadeed_data_sorted['Date'].max()
-                    days_since = (datetime.now().date() - last_jadeed_date).days
+                    days_since = (datetime.now().date() - last_jadeed_date.date()).days
                     st.markdown(f"""
                     <div class="metric-card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
                         <h3 style="margin:0;">📅</h3>
@@ -3111,7 +3266,15 @@ def main():
             
             with st.spinner("⏳ Processing file..."):  # ✅ Changed from st.sidebar.spinner
                 parsed_data = parse_excel_file(uploaded_file)
-                
+                # 🔍 ADD THIS DEBUG SECTION HERE:
+                st.sidebar.write("🔍 DEBUG INFO:")
+                st.sidebar.write(f"Error in parsed_data: {parsed_data.get('error', 'None')}")
+                st.sidebar.write(f"Has student_info: {'student_info' in parsed_data}")
+                if 'student_info' in parsed_data:
+                    st.sidebar.write(f"Student info shape: {parsed_data['student_info'].shape}")
+                    st.sidebar.write(f"Student info columns: {list(parsed_data['student_info'].columns)}")
+                    st.sidebar.write(f"Student name: {parsed_data['student_info']['Student_Name'].iloc[0] if not parsed_data['student_info'].empty else 'EMPTY'}")
+                # 🔍 END DEBUG SECTION
                 if parsed_data.get('error'):
                     st.sidebar.error(f"❌ {parsed_data['error']}")
                 else:
@@ -3135,6 +3298,17 @@ def main():
                         else:
                             st.sidebar.error("❌ Failed to save data - student_id is None")
                             st.sidebar.write("Debug: Check database.py save_student_from_excel function")
+                            
+                            st.sidebar.write("🔍 Testing Google Sheets connection...")
+                            from database import get_google_sheet
+                            test_sheet = get_google_sheet()
+                            if test_sheet:
+                                st.sidebar.success("✅ Google Sheets connected!")
+                                st.sidebar.write(f"Sheet name: {test_sheet.title}")
+                            else:
+                                st.sidebar.error("❌ Google Sheets connection FAILED!")
+                                st.sidebar.write("Check your secrets.toml file!")
+                                
                     except Exception as e:
                         st.sidebar.error(f"❌ Save Error: {str(e)}")
                         import traceback
