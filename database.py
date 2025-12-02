@@ -12,8 +12,8 @@ import os
 import time
 
 # Google Sheets Configuration
-PRODUCTION_SHEET_ID = "1b1sNaNVNWN_wJXaeX0nEJPSgvXJxIPKrzS1IRu0T5yk"  # Real data (deployed)
-TEST_SHEET_ID = "1b1sNaNVNWN_wJXaeX0nEJPSgvXJxIPKrzS1IRu0T5yk"  # Test data (local)
+PRODUCTION_SHEET_ID = "1ZkGPICCFMxu_v8x565Zzz30Nljbx73fXaKo1xyXEroQ"  # Real data (deployed)
+TEST_SHEET_ID = "1He8_sn8I4npcoxw9PrVyQmxKiG-JrAs3cNkfqULzFF0"  # Test data (local)
 
 SCOPE = [
     'https://spreadsheets.google.com/feeds',
@@ -377,4 +377,3 @@ def get_last_jadeed_page(all_data_df):
     except Exception as e:
         print(f"❌ Error getting last jadeed page: {e}")
         return None
-
