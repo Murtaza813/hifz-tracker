@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 import io
 import re
 import altair as alt
+import plotly.express as px
+import plotly.graph_objects as go
 
 from database import (
     init_db, 
@@ -1177,11 +1179,11 @@ def get_murajaat_available_pages(student_data):
 
 
 # =========================================================================
-# MURAJAAT ASSISTANT FUNCTION - WITH OVERALL SESSION MARKS
+# MURAJAAT ASSISTANT FUNCTION - FIXED VERSION (WITH BOTH DATA FORMATS)
 # =========================================================================
 
 def run_murajaat_assistant(student_data_df, student_id):
-    """Murajaat assistant for long-term review of graduated pages WITH OVERALL MARKS"""
+    """Murajaat assistant for long-term review of graduated pages"""
     
     if student_data_df is None or student_data_df.empty:
         st.error("❌ No student data available.")
@@ -1265,173 +1267,706 @@ def run_murajaat_assistant(student_data_df, student_id):
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # Filter data for this sipara - Only look for Murajaat sessions entered through the web form
+    # ✅ FIXED: Filter data for this sipara - Simple and clean
+    # Convert Sipara to string for consistent comparison
+    df['Sipara_Str'] = df['Sipara'].astype(str)
     sipara_data = df[
-        (df['Sipara'] == str(selected_sipara)) & 
-        (df['Session_Type'] == 'Murajaat') &
-        (df['Data_Format'] == 'session_entry')  # Only sessions entered through web form
+        (df['Session_Type'] == 'Murajaat') & 
+        (df['Sipara_Str'] == str(selected_sipara))
     ]
     
-    # =========================================================================
-    # SIMPLE PERFORMANCE OVERVIEW - ONLY SHOWS WHEN SESSIONS ARE ENTERED
+        # =========================================================================
+    # 📈 SIPARA PERFORMANCE OVERVIEW WITH TIMELINE CHART
     # =========================================================================
     st.markdown('<div class="section-header">📈 Sipara Performance Overview</div>', unsafe_allow_html=True)
     
-    if sipara_data.empty:
+    # Get ALL Murajaat data for THIS SIPARA (for timeline chart)
+    timeline_data = df[
+        (df['Session_Type'] == 'Murajaat') &
+        (df['Sipara_Str'] == str(selected_sipara)) &
+        (df['Overall_Grade'].notna())
+    ].copy()
+    
+    if timeline_data.empty:
         st.info("📭 No Murajaat sessions recorded for this Sipara yet. Start recording sessions below to see performance analytics!")
     else:
-        st.success(f"✅ Found {len(sipara_data)} Murajaat session(s) for Sipara {selected_sipara}")
+        # Separate data formats
+        uploaded_data = timeline_data[timeline_data['Data_Format'] == 'upload']
+        detailed_data = timeline_data[timeline_data['Data_Format'] == 'session_entry']
         
-        # Simple metrics
-        col1, col2, col3 = st.columns(3)
+        st.success(f"✅ Found {len(timeline_data)} Murajaat session(s) for Sipara {selected_sipara}")
+        if len(uploaded_data) > 0:
+            st.info(f"📥 {len(uploaded_data)} uploaded sessions")
+        if len(detailed_data) > 0:
+            st.info(f"✍️ {len(detailed_data)} detailed web entries")
         
-        with col1:
-            st.metric("Total Sessions", len(sipara_data))
+        # =========================================================================
+        # 📈 TIME-BASED PERFORMANCE CHART
+        # =========================================================================
         
-        with col2:
-            if 'Mistake_Count' in sipara_data.columns and 'Mistake_Type' in sipara_data.columns:
-                total_mistakes = sipara_data['Mistake_Count'].sum()
-                st.metric("Total Mistakes", int(total_mistakes))
-            else:
-                st.metric("Total Mistakes", "N/A")
+        # Convert to numeric marks
+        timeline_data['Mark_Numeric'] = pd.to_numeric(timeline_data['Overall_Grade'], errors='coerce')
+        valid_marks = timeline_data.dropna(subset=['Mark_Numeric', 'Date'])
         
-        with col3:
-            # Check for Overall_Grade (which stores marks 1-10 for Murajaat)
-            if 'Overall_Grade' in sipara_data.columns:
-                # Filter for Session_Summary entries only (these have the marks)
-                summary_data = sipara_data[sipara_data['Core_Mistake'] == 'Session_Summary']
-                valid_marks = summary_data['Overall_Grade'].dropna()
-                
-                if not valid_marks.empty:
-                    # Convert to numeric and calculate average mark
-                    marks_numeric = pd.to_numeric(valid_marks, errors='coerce').dropna()
-                    if not marks_numeric.empty:
-                        avg_mark = marks_numeric.mean()
-                        st.metric("Avg Mark", f"{avg_mark:.1f}/10")
-                    else:
-                        st.metric("Avg Mark", "N/A")
-                else:
-                    st.metric("Avg Mark", "N/A")
-            else:
-                st.metric("Avg Mark", "N/A")
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # =========================================================================
-    # PAGE PERFORMANCE MAP
-    # =========================================================================
-    st.markdown('<div class="section-header">🗺️ Page Performance Map</div>', unsafe_allow_html=True)
-    st.markdown(f"""
-    <p style="text-align: center; color: #6b7280; font-size: 1.1em;">
-        Visual health check of Pages {min(available_pages)} - {max(available_pages)}
-    </p>
-    """, unsafe_allow_html=True)
-    
-    # Create page health map
-    page_health_map = {}
-    for page_num in available_pages:
-        p_data = sipara_data[sipara_data['Page'] == str(page_num)]
-        
-        if p_data.empty:
-            status = "untested"
-            color_code = "#e5e7eb"
-            font_color = "#9ca3af"
-            mistake_summary = "Not tested"
-        else:
-            if 'Mistake_Type' in p_data.columns and 'Mistake_Count' in p_data.columns:
-                talqeen_sum = p_data[p_data['Mistake_Type'] == 'Talqeen']['Mistake_Count'].sum()
-                tambeeh_sum = p_data[p_data['Mistake_Type'] == 'Tambeeh']['Mistake_Count'].sum()
-                
-                if talqeen_sum > 0:
-                    status = "critical"
-                    color_code = "#fee2e2"
-                    font_color = "#dc2626"
-                    mistake_summary = f"{int(talqeen_sum)} Tal / {int(tambeeh_sum)} Tam"
-                elif tambeeh_sum >= 3:
-                    status = "weak"
-                    color_code = "#fef3c7"
-                    font_color = "#d97706"
-                    mistake_summary = f"{int(tambeeh_sum)} Tam"
-                else:
-                    status = "good"
-                    color_code = "#d1fae5"
-                    font_color = "#059669"
-                    mistake_summary = "Good ✓"
-            else:
-                grade_column = None
-                for col in ['Mark', 'Overall_Grade', 'Final_Grade']:
-                    if col in p_data.columns and not p_data[col].isna().all():
-                        grade_column = col
-                        break
-                
-                if grade_column:
-                    # Convert grades to numeric before calculating mean
-                    p_data_copy = p_data.copy()
-                    p_data_copy['grade_numeric'] = p_data_copy[grade_column].apply(grade_to_numeric)
-                    p_data_copy = p_data_copy.dropna(subset=['grade_numeric'])
-                    
-                    if not p_data_copy.empty:
-                        avg_mark = p_data_copy['grade_numeric'].mean()
-                    else:
-                        avg_mark = 10
-                else:
-                    avg_mark = 10
-                    
-                if avg_mark <= 7:
-                    status = "critical"
-                    color_code = "#fee2e2"
-                    font_color = "#dc2626"
-                    mistake_summary = f"Grade: {avg_mark:.1f}"
-                elif avg_mark <= 8:
-                    status = "weak"
-                    color_code = "#fef3c7"
-                    font_color = "#d97706"
-                    mistake_summary = f"Grade: {avg_mark:.1f}"
-                else:
-                    status = "good"
-                    color_code = "#d1fae5"
-                    font_color = "#059669"
-                    mistake_summary = f"Grade: {avg_mark:.1f}"
-        
-        page_health_map[page_num] = {
-            "status": status, 
-            "color": color_code, 
-            "text": font_color, 
-            "summary": mistake_summary
-        }
-    
-    # Display page map
-    num_cols = 5
-    num_rows = (len(available_pages) + num_cols - 1) // num_cols
-    
-    for row_idx in range(num_rows):
-        cols = st.columns(num_cols)
-        for col_idx in range(num_cols):
-            page_idx = row_idx * num_cols + col_idx
-            if page_idx >= len(available_pages):
-                break
+        if len(valid_marks) > 0:
+            # Sort by date
+            valid_marks = valid_marks.sort_values('Date')
             
-            page_num = available_pages[page_idx]
-            data = page_health_map[page_num]
+            # Calculate statistics
+            total_sessions = len(valid_marks)
+            avg_mark = valid_marks['Mark_Numeric'].mean()
             
-            with cols[col_idx]:
-                st.markdown(f"""
-                <div class="page-box" style="background-color: {data['color']}; 
-                                            border: 2px solid {data['text']};">
-                    <div style="color: {data['text']}; font-size: 1.2em; font-weight: bold;">
-                        Page {page_num}
-                    </div>
-                    <div style="color: {data['text']}; font-size: 0.85em; margin-top: 5px;">
-                        {data['summary']}
+            # Display statistics above chart
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📅 Total Sessions", total_sessions)
+            with col2:
+                st.metric("📊 Average Mark", f"{avg_mark:.1f}/10")
+            with col3:
+                # Calculate trend (latest - oldest)
+                if len(valid_marks) > 1:
+                    oldest = valid_marks.iloc[0]['Mark_Numeric']
+                    latest = valid_marks.iloc[-1]['Mark_Numeric']
+                    trend = latest - oldest
+                    st.metric("📈 Trend", f"{trend:+.1f}", delta=f"{trend:+.1f}")
+                else:
+                    st.metric("📈 Trend", "N/A")
+            
+            # Create line chart
+            st.markdown("#### 📈 Sipara Performance Timeline")
+            
+            if len(valid_marks) > 1:
+                # Prepare data for chart
+                chart_data = valid_marks[['Date', 'Mark_Numeric', 'Data_Format']].copy()
+                chart_data['Date'] = pd.to_datetime(chart_data['Date'])
+                
+                # Create figure
+                import plotly.graph_objects as go
+                fig = go.Figure()
+                
+                # Add line trace
+                fig.add_trace(go.Scatter(
+                    x=chart_data['Date'],
+                    y=chart_data['Mark_Numeric'],
+                    mode='lines+markers',
+                    name='Performance',
+                    line=dict(color='#3b82f6', width=3),
+                    marker=dict(size=10, color='#3b82f6'),
+                    hovertemplate='<b>Date:</b> %{x|%b %d}<br><b>Mark:</b> %{y}/10<extra></extra>'
+                ))
+                
+                # Add horizontal reference lines
+                fig.add_hline(y=8, line_dash="dash", line_color="green", 
+                             annotation_text="Excellent (8+)", 
+                             annotation_position="bottom right")
+                fig.add_hline(y=6, line_dash="dash", line_color="orange", 
+                             annotation_text="Average (6+)", 
+                             annotation_position="bottom right")
+                fig.add_hline(y=4, line_dash="dash", line_color="red", 
+                             annotation_text="Needs Work", 
+                             annotation_position="bottom right")
+                
+                # Update layout
+                fig.update_layout(
+                    title=f"Sipara {selected_sipara} Performance Over Time",
+                    xaxis_title="Session Date",
+                    yaxis_title="Mark (out of 10)",
+                    yaxis=dict(range=[0, 10.5]),
+                    hovermode='x unified',
+                    template='plotly_white',
+                    height=400
+                )
+                
+                # Color code markers by data source
+                uploaded_dates = chart_data[chart_data['Data_Format'] == 'upload']['Date']
+                uploaded_marks = chart_data[chart_data['Data_Format'] == 'upload']['Mark_Numeric']
+                
+                session_dates = chart_data[chart_data['Data_Format'] == 'session_entry']['Date']
+                session_marks = chart_data[chart_data['Data_Format'] == 'session_entry']['Mark_Numeric']
+                
+                if not uploaded_dates.empty:
+                    fig.add_trace(go.Scatter(
+                        x=uploaded_dates,
+                        y=uploaded_marks,
+                        mode='markers',
+                        name='📥 Uploaded Data',
+                        marker=dict(size=12, color='#10b981', symbol='square'),
+                        hovertemplate='<b>Uploaded Data</b><br>Date: %{x|%b %d}<br>Mark: %{y}/10<extra></extra>'
+                    ))
+                
+                if not session_dates.empty:
+                    fig.add_trace(go.Scatter(
+                        x=session_dates,
+                        y=session_marks,
+                        mode='markers',
+                        name='✍️ Session Entry',
+                        marker=dict(size=12, color='#f59e0b', symbol='circle'),
+                        hovertemplate='<b>Session Entry</b><br>Date: %{x|%b %d}<br>Mark: %{y}/10<extra></extra>'
+                    ))
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Data source legend
+                st.markdown("""
+                <div style="background: #f3f4f6; padding: 10px; border-radius: 8px; margin-top: 10px;">
+                    <div style="display: flex; justify-content: center; gap: 20px; color: #6b7280;">
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            <div style="width: 12px; height: 12px; background: #10b981; border-radius: 2px;"></div>
+                            <span>📥 Uploaded Excel Data</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 5px;">
+                            <div style="width: 12px; height: 12px; background: #f59e0b; border-radius: 50%;"></div>
+                            <span>✍️ Web Session Entry</span>
+                        </div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
+                
+                # Show data points table
+                with st.expander("📋 View All Data Points", expanded=False):
+                    display_data = valid_marks[['Date', 'Mark_Numeric', 'Data_Format']].copy()
+                    display_data['Date'] = display_data['Date'].dt.strftime('%Y-%m-%d')
+                    display_data['Data_Source'] = display_data['Data_Format'].map({
+                        'upload': '📥 Uploaded',
+                        'session_entry': '✍️ Session'
+                    })
+                    display_data = display_data.rename(columns={
+                        'Mark_Numeric': 'Mark',
+                        'Data_Source': 'Source'
+                    })
+                    st.dataframe(display_data[['Date', 'Mark', 'Source']], use_container_width=True)
+            
+            else:
+                # Only one data point
+                st.info(f"Only one data point available: **{valid_marks.iloc[0]['Mark_Numeric']}/10** on {valid_marks.iloc[0]['Date'].strftime('%b %d, %Y')}")
+                st.write("Record more sessions to see performance trends!")
+        
+        else:
+            st.info("No valid marks with dates available for charting.")
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+
+     # =========================================================================
+    # 1. 📊 MURAJAAT RETENTION HEALTH SCORE (USES BOTH DATA SOURCES)
+    # =========================================================================
+    st.markdown(f'<div class="section-header">📊 Sipara {selected_sipara} Retention Health</div>', unsafe_allow_html=True)
+    
+    # Get ALL Murajaat data for THIS SIPARA (both uploaded and new entries)
+    sipara_all_data = df[
+        (df['Session_Type'] == 'Murajaat') &
+        (df['Sipara_Str'] == str(selected_sipara)) &
+        (df['Overall_Grade'].notna())
+    ].copy()
+    
+    if not sipara_all_data.empty:
+        # Separate data sources for analysis
+        uploaded_data = sipara_all_data[sipara_all_data['Data_Format'] == 'upload']
+        session_data = sipara_all_data[sipara_all_data['Data_Format'] == 'session_entry']
+        
+        st.info(f"📊 Using {len(uploaded_data)} uploaded marks + {len(session_data)} session marks")
+        
+        # Convert ALL Overall_Grade values to numeric (1-10)
+        sipara_all_data['Mark_Numeric'] = pd.to_numeric(sipara_all_data['Overall_Grade'], errors='coerce')
+        valid_marks = sipara_all_data.dropna(subset=['Mark_Numeric'])
+        
+        if not valid_marks.empty:
+            # Calculate average from ALL valid marks
+            avg_mark = valid_marks['Mark_Numeric'].mean()
+            health_score = (avg_mark / 10) * 100
+            
+            # Determine health status
+            if health_score >= 80:
+                color = "#10b981"
+                emoji = "✅"
+                status = "Excellent Retention"
+                message = "This sipara is very well retained!"
+            elif health_score >= 70:
+                color = "#3b82f6"
+                emoji = "👍"
+                status = "Good Retention"
+                message = "Regular revision is working well."
+            elif health_score >= 60:
+                color = "#f59e0b"
+                emoji = "⚠️"
+                status = "Average Retention"
+                message = "This sipara needs more focused revision."
+            else:
+                color = "#ef4444"
+                emoji = "❌"
+                status = "Needs Improvement"
+                message = "Increase revision frequency."
+            
+            # Display health card
+            col1, col2, col3 = st.columns([2, 1, 1])
+            
+            with col1:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, {color}15 0%, {color}30 100%);
+                            border: 2px solid {color};
+                            border-radius: 15px;
+                            padding: 20px;
+                            text-align: center;">
+                    <div style="font-size: 1.2em; color: #6b7280; margin-bottom: 10px;">
+                        Sipara {selected_sipara} Retention Health
+                    </div>
+                    <div style="display: flex; justify-content: center; align-items: center; gap: 15px; margin-bottom: 15px;">
+                        <div style="font-size: 3em;">
+                            {emoji}
+                        </div>
+                        <div>
+                            <div style="font-size: 2.5em; font-weight: bold; color: {color};">
+                                {avg_mark:.1f}/10
+                            </div>
+                            <div style="color: #374151; font-size: 1.1em;">
+                                {status}
+                            </div>
+                        </div>
+                    </div>
+                    <div style="color: #6b7280; font-size: 0.9em; margin-top: 10px;">
+                        Based on {len(valid_marks)} marks • {message}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                # Show data source breakdown
+                st.markdown("**📊 Data Sources**")
+                
+                if len(uploaded_data) > 0 and len(session_data) > 0:
+                    st.success(f"✅ {len(uploaded_data)} uploaded")
+                    st.success(f"✅ {len(session_data)} session")
+                elif len(uploaded_data) > 0:
+                    st.info(f"📥 {len(uploaded_data)} uploaded")
+                else:
+                    st.info(f"✍️ {len(session_data)} session")
+            
+            with col3:
+                # Calculate average by data source
+                if len(uploaded_data) > 0 and len(session_data) > 0:
+                    uploaded_avg = pd.to_numeric(uploaded_data['Overall_Grade'], errors='coerce').mean()
+                    session_avg = pd.to_numeric(session_data[session_data['Core_Mistake'] == 'Session_Summary']['Overall_Grade'], errors='coerce').mean()
+                    
+                    st.metric("📥 Uploaded Avg", f"{uploaded_avg:.1f}")
+                    st.metric("✍️ Session Avg", f"{session_avg:.1f}")
+            
+            # Show trend if enough data
+            if len(valid_marks) > 1:
+                st.markdown("#### 📈 Performance Timeline")
+                
+                # Sort by date for timeline
+                timeline_data = valid_marks.sort_values('Date')
+                
+                # Create simple timeline
+                cols = st.columns(min(5, len(timeline_data)))
+                for idx, (_, mark_row) in enumerate(timeline_data.iterrows()):
+                    with cols[idx % 5]:
+                        mark = mark_row['Mark_Numeric']
+                        date_str = mark_row['Date'].strftime('%m/%d')
+                        data_source = "📥" if mark_row['Data_Format'] == 'upload' else "✍️"
+                        
+                        # Color based on mark
+                        if mark >= 8:
+                            mark_color = "#10b981"
+                        elif mark >= 7:
+                            mark_color = "#3b82f6"
+                        elif mark >= 6:
+                            mark_color = "#f59e0b"
+                        else:
+                            mark_color = "#ef4444"
+                        
+                        st.markdown(f"""
+                        <div style="background: {mark_color}15;
+                                    border: 2px solid {mark_color};
+                                    border-radius: 10px;
+                                    padding: 12px;
+                                    text-align: center;
+                                    margin-bottom: 5px;">
+                            <div style="color: #6b7280; font-size: 0.7em; margin-bottom: 5px;">
+                                {data_source} {date_str}
+                            </div>
+                            <div style="font-size: 1.5em; font-weight: bold; color: {mark_color};">
+                                {mark:.1f}
+                            </div>
+                            <div style="color: #6b7280; font-size: 0.7em;">
+                                /10
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                
+                # Show combined average
+                st.info(f"**Combined Average: {avg_mark:.1f}/10** (from {len(uploaded_data)} uploaded + {len(session_data)} session marks)")
+        
+        else:
+            st.warning("No valid numeric marks found in the data.")
+    
+    else:
+        # NO DATA for this sipara
+        st.info(f"""
+        **📝 No Murajaat Data for Sipara {selected_sipara}**
+        
+        **To see retention health:**
+        1. Upload Excel data with Murajaat marks (1-10)
+        2. OR record new sessions with Overall Marks
+        3. Both data sources will be combined!
+        """)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+        # =========================================================================
+    # 3. 🔍 MISTAKE PATTERN ANALYSIS - FIXED FOR YOUR COLUMN NAMES
+    # =========================================================================
+    st.markdown('<div class="section-header">🔍 Mistake Pattern Analysis</div>', unsafe_allow_html=True)
+    
+    # Check for detailed session data with mistake counts
+    # FIX: Look for Mistake_Count and Tambeeh_Count (your actual column names!)
+    if not sipara_data.empty and 'Mistake_Count' in sipara_data.columns and 'Tambeeh_Count' in sipara_data.columns:
+        # Get detailed session entries (not Session_Summary)
+        detailed_sessions = sipara_data[
+            (sipara_data['Data_Format'] == 'session_entry') &
+            (sipara_data['Core_Mistake'] != 'Session_Summary') &
+            (sipara_data['Mistake_Count'].notna() | sipara_data['Tambeeh_Count'].notna())
+        ]
+        
+        if not detailed_sessions.empty:
+            # Calculate totals
+            total_talqeen = detailed_sessions['Mistake_Count'].sum()
+            total_tambeeh = detailed_sessions['Tambeeh_Count'].sum()
+            total_mistakes = total_talqeen + total_tambeeh
+            total_pages = len(detailed_sessions)
+            
+            st.success(f"✅ Analyzing {total_pages} detailed page entries")
+            
+            # Display metrics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("🔴 Talqeen Mistakes", f"{int(total_talqeen)}")
+                st.caption("Mistake_Count column")
+            
+            with col2:
+                st.metric("🟡 Tambeeh Mistakes", f"{int(total_tambeeh)}")
+                st.caption("Tambeeh_Count column")
+            
+            with col3:
+                st.metric("📊 Total Mistakes", f"{int(total_mistakes)}")
+            
+            with col4:
+                if total_pages > 0:
+                    mistakes_per_page = total_mistakes / total_pages
+                    st.metric("📈 Avg per Page", f"{mistakes_per_page:.1f}")
+                else:
+                    st.metric("📈 Avg per Page", "0.0")
+            
+            # Show detailed breakdown
+            st.markdown("#### 📋 Page-by-Page Breakdown")
+            
+            # Create a table of pages with mistakes
+            mistake_table = detailed_sessions[['Page', 'Mistake_Count', 'Tambeeh_Count']].copy()
+            mistake_table = mistake_table.rename(columns={
+                'Page': '📄 Page',
+                'Mistake_Count': '🔴 Talqeen',
+                'Tambeeh_Count': '🟡 Tambeeh'
+            })
+            
+            # Calculate total per page
+            mistake_table['📊 Total'] = mistake_table['🔴 Talqeen'] + mistake_table['🟡 Tambeeh']
+            
+            # Sort by total mistakes (highest first)
+            mistake_table = mistake_table.sort_values('📊 Total', ascending=False)
+            
+            # Display as metrics
+            st.dataframe(mistake_table, use_container_width=True)
+            
+            # Mistake ratio analysis
+            if total_mistakes > 0:
+                talqeen_percent = (total_talqeen / total_mistakes) * 100
+                tambeeh_percent = (total_tambeeh / total_mistakes) * 100
+                
+                st.markdown("#### 📊 Mistake Ratio Analysis")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Talqeen ratio gauge
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+                                border: 2px solid #ef4444;
+                                border-radius: 10px;
+                                padding: 20px;
+                                text-align: center;
+                                margin-bottom: 10px;">
+                        <div style="color: #991b1b; font-size: 1.1em; margin-bottom: 10px;">
+                            🔴 Talqeen Ratio
+                        </div>
+                        <div style="font-size: 2.5em; font-weight: bold; color: #dc2626;">
+                            {talqeen_percent:.0f}%
+                        </div>
+                        <div style="color: #991b1b; font-size: 0.9em; margin-top: 10px;">
+                            Memory/Recitation Errors
+                        </div>
+                        <div style="color: #dc2626; font-size: 0.8em; margin-top: 5px;">
+                            {int(total_talqeen)} out of {int(total_mistakes)} mistakes
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    # Tambeeh ratio gauge
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+                                border: 2px solid #f59e0b;
+                                border-radius: 10px;
+                                padding: 20px;
+                                text-align: center;
+                                margin-bottom: 10px;">
+                        <div style="color: #92400e; font-size: 1.1em; margin-bottom: 10px;">
+                            🟡 Tambeeh Ratio
+                        </div>
+                        <div style="font-size: 2.5em; font-weight: bold; color: #d97706;">
+                            {tambeeh_percent:.0f}%
+                        </div>
+                        <div style="color: #92400e; font-size: 0.9em; margin-top: 10px;">
+                            Fluency/Smoothness Errors
+                        </div>
+                        <div style="color: #d97706; font-size: 0.8em; margin-top: 5px;">
+                            {int(total_tambeeh)} out of {int(total_mistakes)} mistakes
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # What does this mean?
+                st.markdown("#### 💡 Analysis & Recommendations")
+                
+                # Show your specific data
+                st.info(f"""
+                **📊 Your Sipara 3 Mistake Analysis:**
+                
+                Based on {total_pages} pages reviewed:
+                - **Total Mistakes:** {int(total_mistakes)}
+                - **Talqeen (Memory):** {int(total_talqeen)} ({talqeen_percent:.0f}%)
+                - **Tambeeh (Fluency):** {int(total_tambeeh)} ({tambeeh_percent:.0f}%)
+                """)
+                
+                # Page-specific analysis
+                st.markdown("**📄 Page-by-Page Analysis:**")
+                for _, row in mistake_table.iterrows():
+                    page = row['📄 Page']
+                    tal = row['🔴 Talqeen']
+                    tam = row['🟡 Tambeeh']
+                    total = row['📊 Total']
+                    
+                    if total > 0:
+                        if tal > tam:
+                            issue = "Memory issues"
+                        elif tam > tal:
+                            issue = "Fluency issues"
+                        else:
+                            issue = "Balanced issues"
+                        
+                        st.write(f"- **Page {page}:** {tal}T/{tam}H → {issue}")
+                
+                # Recommendations based on ratios
+                if talqeen_percent > 60:
+                    st.warning("""
+                    **🎯 Primary Issue: Memory Accuracy (Talqeen)**
+                    
+                    **Recommendations:**
+                    1. Focus on memorization drills for weak pages
+                    2. Break problematic verses into smaller sections
+                    3. Increase repetition for accuracy
+                    4. Use visualization techniques for memory retention
+                    """)
+                elif tambeeh_percent > 60:
+                    st.warning("""
+                    **🎯 Primary Issue: Reading Fluency (Tambeeh)**
+                    
+                    **Recommendations:**
+                    1. Practice reading with proper tajweed rules
+                    2. Work on connecting verses smoothly
+                    3. Focus on breath control and pace
+                    4. Listen to Qari recitations for rhythm
+                    """)
+                else:
+                    st.info("""
+                    **📊 Balanced Issues**
+                    
+                    **Work on both equally:**
+                    1. Memory accuracy drills
+                    2. Reading fluency practice
+                    3. Regular revision schedule
+                    """)
+            
+            else:
+                st.success("🎉 **Perfect!** No mistakes recorded in detailed sessions.")
+        
+        else:
+            st.info("""
+            **📊 No Detailed Page Data Found**
+            
+            **To see mistake pattern analysis:**
+            1. Make sure you're recording individual page entries (not just Session Summary)
+            2. Enter Mistake_Count (Talqeen) and Tambeeh_Count for each page
+            3. The analysis will appear here!
+            
+            **Debug Info:**
+            - ✅ Found 'Mistake_Count' column
+            - ✅ Found 'Tambeeh_Count' column  
+            - ❌ No detailed page entries with these columns filled
+            """)
+    
+    else:
+        st.info("""
+        **🔍 No Mistake Pattern Data Available**
+        
+        **Looking for columns:** 'Mistake_Count' and 'Tambeeh_Count'
+        
+        **Your data has these columns:**
+        - ✅ Mistake_Count (Talqeen mistakes)
+        - ✅ Tambeeh_Count (Tambeeh mistakes)
+        - ✅ Core_Mistake (to filter out Session_Summary)
+        
+        **The analysis should work now!** If not, check:
+        1. Do you have rows with Data_Format = 'session_entry'?
+        2. Do those rows have Core_Mistake ≠ 'Session_Summary'?
+        3. Are Mistake_Count and Tambeeh_Count filled with numbers?
+        """)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+
+
+    # =========================================================================
+    # PAGE PERFORMANCE MAP
+    # =========================================================================
+    
+    st.markdown('<div class="section-header">🗺️ Page Performance Map</div>', unsafe_allow_html=True)
+    
+    # Check if we have data
+    if sipara_data.empty:
+        st.warning(f"⚠️ No Murajaat data found for Sipara {selected_sipara}")
+        st.info("Add session data below to see page performance")
+    else:
+        # Create page health map
+        page_health_map = {}
+        
+        for page_num in available_pages:
+            page_num_str = str(page_num)
+            
+            # Filter data for this page - CHECK BOTH FORMATS
+            p_data = sipara_data[sipara_data['Page'].astype(str) == page_num_str]
+            
+            if p_data.empty:
+                # No data for this page
+                page_health_map[page_num] = {
+                    "status": "untested", 
+                    "color": "#e5e7eb", 
+                    "text": "#9ca3af", 
+                    "summary": "Not tested"
+                }
+            else:
+                # We have data for this page
+                status = "reviewed"
+                color_code = "#dbeafe"
+                font_color = "#1d4ed8"
+                summary = "Reviewed"
+                
+                # Check for uploaded data grades first
+                uploaded_grades = p_data[p_data['Data_Format'] == 'upload']['Overall_Grade']
+                if not uploaded_grades.empty and not uploaded_grades.isna().all():
+                    try:
+                        avg_grade = float(uploaded_grades.iloc[0])
+                        summary = f"Grade: {avg_grade:.1f}"
+                        
+                        # Apply the same grade-based color logic
+                        if avg_grade >= 8:
+                            status = "good"
+                            color_code = "#d1fae5"
+                            font_color = "#059669"
+                        elif avg_grade >= 7:
+                            status = "weak"
+                            color_code = "#fef3c7"
+                            font_color = "#d97706"
+                        else:  # avg_grade < 7
+                            status = "critical"
+                            color_code = "#fee2e2"
+                            font_color = "#dc2626"
+                    except:
+                        pass
+                
+                # ✅ CORRECTED: Check for detailed data mistakes with GRADE CALCULATION
+                elif 'Mistake_Count' in p_data.columns and 'Tambeeh_Count' in p_data.columns:
+                    detailed_data = p_data[p_data['Data_Format'] == 'session_entry']
+                    if not detailed_data.empty:
+                        talqeen_sum = detailed_data['Mistake_Count'].sum()
+                        tambeeh_sum = detailed_data['Tambeeh_Count'].sum()
+                        
+                        # Calculate grade based on your rules
+                        calculated_grade = 10 - (talqeen_sum * 1) - (tambeeh_sum * 0.5)
+                        
+                        # Format summary
+                        summary = f"{int(talqeen_sum)}T/{int(tambeeh_sum)}H"
+                        
+                        # Determine color based on calculated grade
+                        if calculated_grade >= 8:
+                            status = "good"
+                            color_code = "#d1fae5"
+                            font_color = "#059669"
+                            summary = f"{summary} ({calculated_grade:.1f})"
+                        elif calculated_grade >= 7:
+                            status = "weak"
+                            color_code = "#fef3c7"
+                            font_color = "#d97706"
+                            summary = f"{summary} ({calculated_grade:.1f})"
+                        else:  # calculated_grade < 7
+                            status = "critical"
+                            color_code = "#fee2e2"
+                            font_color = "#dc2626"
+                            summary = f"{summary} ({calculated_grade:.1f})"
+                
+                page_health_map[page_num] = {
+                    "status": status, 
+                    "color": color_code, 
+                    "text": font_color, 
+                    "summary": summary
+                }
+        
+        # Display page map
+        num_cols = 5
+        num_rows = (len(available_pages) + num_cols - 1) // num_cols
+        
+        for row_idx in range(num_rows):
+            cols = st.columns(num_cols)
+            for col_idx in range(num_cols):
+                page_idx = row_idx * num_cols + col_idx
+                if page_idx >= len(available_pages):
+                    break
+                
+                page_num = available_pages[page_idx]
+                data = page_health_map[page_num]
+                
+                with cols[col_idx]:
+                    st.markdown(f"""
+                    <div class="page-box" style="background-color: {data['color']}; 
+                                                border: 2px solid {data['text']};
+                                                padding: 10px;
+                                                border-radius: 8px;
+                                                text-align: center;
+                                                margin-bottom: 10px;
+                                                min-height: 80px;
+                                                display: flex;
+                                                flex-direction: column;
+                                                justify-content: center;">
+                        <div style="color: {data['text']}; font-size: 1.2em; font-weight: bold;">
+                            Page {page_num}
+                        </div>
+                        <div style="color: {data['text']}; font-size: 0.85em; margin-top: 5px;">
+                            {data['summary']}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
     
     st.markdown("<br><br>", unsafe_allow_html=True)
     
-    # Focus Areas - FIXED VERSION
+    # Focus Areas
     st.markdown('<div class="section-header">🎯 Focus Areas</div>', unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
@@ -1439,129 +1974,61 @@ def run_murajaat_assistant(student_data_df, student_id):
     with col1:
         st.markdown("**🔴 Weak Pages (Priority Review)**")
         
-        if 'Mistake_Type' in sipara_data.columns and 'Mistake_Count' in sipara_data.columns:
-            talqeen_stats = sipara_data[sipara_data['Mistake_Type'] == 'Talqeen'].groupby('Page')['Mistake_Count'].sum().reset_index()
-            tambeeh_stats = sipara_data[sipara_data['Mistake_Type'] == 'Tambeeh'].groupby('Page')['Mistake_Count'].sum().reset_index()
+        if not sipara_data.empty:
+            weak_pages = []
+            for page_num, data in page_health_map.items():
+                if data['status'] in ['critical', 'weak']:
+                    weak_pages.append(page_num)
             
-            page_stats = talqeen_stats.merge(tambeeh_stats, on='Page', how='outer', suffixes=('_Talqeen', '_Tambeeh')).fillna(0)
-            weak = page_stats[(page_stats['Mistake_Count_Talqeen'] >= 3) | (page_stats['Mistake_Count_Tambeeh'] >= 4)].sort_values(by='Mistake_Count_Talqeen', ascending=False)
-            
-            if not weak.empty:
-                for _, row in weak.iterrows():
-                    try:
-                        page_int = int(row['Page'])
-                        if page_int in available_pages:
-                            st.markdown(f"""
-                            <div style="background: #fee2e2; padding: 12px; border-radius: 8px; 
-                                        margin: 8px 0; border-left: 4px solid #dc2626;">
-                                <strong style="color: #dc2626;">Page {row['Page']}</strong>
-                                <span style="color: #991b1b;"> • {int(row['Mistake_Count_Talqeen'])} Talqeen / {int(row['Mistake_Count_Tambeeh'])} Tambeeh</span>
-                            </div>
-                            """, unsafe_allow_html=True)
-                    except:
-                        pass
+            if weak_pages:
+                st.success(f"**Pages needing review:** {', '.join(map(str, sorted(weak_pages)))}")
             else:
-                st.markdown("""
-                <div class="success-section">
-                    <p style="margin: 0;">✅ No critical weak pages detected!</p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.info("No weak pages detected")
         else:
-            grade_column = None
-            for col in ['Mark', 'Overall_Grade', 'Final_Grade']:
-                if col in sipara_data.columns:
-                    grade_column = col
-                    break
-            
-            if grade_column:
-                # FIXED: Convert grades to numeric before grouping
-                sipara_data_copy = sipara_data.copy()
-                sipara_data_copy['grade_numeric'] = sipara_data_copy[grade_column].apply(grade_to_numeric)
-                sipara_data_copy = sipara_data_copy.dropna(subset=['grade_numeric'])
-                
-                if not sipara_data_copy.empty:
-                    mark_stats = sipara_data_copy.groupby('Page')['grade_numeric'].mean().reset_index()
-                    weak = mark_stats[mark_stats['grade_numeric'] <= 7.5].sort_values(by='grade_numeric')
-                    
-                    if not weak.empty:
-                        for _, row in weak.iterrows():
-                            try:
-                                page_int = int(row['Page'])
-                                if page_int in available_pages:
-                                    st.markdown(f"""
-                                    <div style="background: #fee2e2; padding: 12px; border-radius: 8px; 
-                                                margin: 8px 0; border-left: 4px solid #dc2626;">
-                                        <strong style="color: #dc2626;">Page {row['Page']}</strong>
-                                        <span style="color: #991b1b;"> • Avg: {row['grade_numeric']:.1f}/10</span>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                            except:
-                                pass
-                    else:
-                        st.markdown("""
-                        <div class="success-section">
-                            <p style="margin: 0;">✅ No weak pages detected!</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                else:
-                    st.info("No valid grade data available for weak page analysis")
-            else:
-                st.info("No grade data available")
+            st.info("No session data available")
     
     with col2:
         st.markdown("**🕸️ Neglected Pages (Review Soon)**")
         
-        if 'Date' in sipara_data.columns:
-            # Convert dates to datetime and get recent sessions
-            sipara_data_copy = sipara_data.copy()
-            sipara_data_copy['Date'] = pd.to_datetime(sipara_data_copy['Date'])
-            recent_dates = sipara_data_copy.sort_values('Date', ascending=False)['Date'].unique()[:3]
-            
-            if len(recent_dates) > 0:
-                tested_pages = set()
-                for date in recent_dates:
-                    date_pages = sipara_data_copy[sipara_data_copy['Date'] == date]['Page'].dropna().unique()
-                    for page in date_pages:
-                        try:
-                            page_int = int(page)
-                            if page_int in available_pages:
-                                tested_pages.add(page_int)
-                        except:
-                            pass
+        if not sipara_data.empty and 'Date' in sipara_data.columns:
+            # Simple logic: pages without recent data
+            recent_pages = []
+            try:
+                sipara_data['Date'] = pd.to_datetime(sipara_data['Date'])
+                recent_date = sipara_data['Date'].max()
                 
-                neglected = sorted(list(set(available_pages) - tested_pages))
-                if neglected:
-                    st.markdown(f"""
-                    <div style="background: #fef3c7; padding: 15px; border-radius: 10px; 
-                                border-left: 4px solid #f59e0b;">
-                        <p style="color: #92400e; margin: 0;">
-                            <strong>💡 Suggested Review:</strong><br>
-                            Pages {', '.join(map(str, neglected[:5]))}
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.markdown("""
-                    <div class="success-section">
-                        <p style="margin: 0;">✅ All pages rotated recently!</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                for page_num in available_pages:
+                    page_data = sipara_data[sipara_data['Page'].astype(str) == str(page_num)]
+                    if not page_data.empty:
+                        page_latest = page_data['Date'].max()
+                        if (recent_date - page_latest).days <= 7:
+                            recent_pages.append(page_num)
+            except:
+                recent_pages = []
+            
+            neglected = sorted([p for p in available_pages if p not in recent_pages])
+            
+            if neglected:
+                st.warning(f"**Pages not reviewed recently:** {', '.join(map(str, neglected[:5]))}")
             else:
-                st.info("Not enough session history")
+                st.success("All pages reviewed recently")
         else:
             st.info("No date data available")
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # Technical focus (only for new format)
-    if 'Core_Mistake' in sipara_data.columns and 'Specific_Mistake' in sipara_data.columns:
+    # Rest of the function continues...
+    
+    # Technical focus (only for detailed format)
+    detailed_data = sipara_data[sipara_data['Data_Format'] == 'session_entry']
+    if not detailed_data.empty and 'Core_Mistake' in detailed_data.columns:
         st.markdown('<div class="section-header">🎯 Technical Focus Areas</div>', unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
         
         with col1:
             st.markdown("**🗣️ Makharij to Watch**")
-            makh = sipara_data[sipara_data['Core_Mistake'] == 'Makharij']['Specific_Mistake'].value_counts().head(3)
+            makh = detailed_data[detailed_data['Core_Mistake'] == 'Makharij']['Specific_Mistake'].value_counts().head(3)
             if not makh.empty:
                 for letter, count in makh.items():
                     st.markdown(f"""
@@ -1576,7 +2043,7 @@ def run_murajaat_assistant(student_data_df, student_id):
         
         with col2:
             st.markdown("**📏 Ahkaam to Watch**")
-            taj = sipara_data[sipara_data['Core_Mistake'] == 'Tajweed']['Specific_Mistake'].value_counts().head(3)
+            taj = detailed_data[detailed_data['Core_Mistake'] == 'Tajweed']['Specific_Mistake'].value_counts().head(3)
             if not taj.empty:
                 for rule, count in taj.items():
                     st.markdown(f"""
@@ -1591,7 +2058,6 @@ def run_murajaat_assistant(student_data_df, student_id):
         
         st.markdown("<br>", unsafe_allow_html=True)
     
-    # Session entry form
     st.markdown('<div class="section-header">📝 Record New Session</div>', unsafe_allow_html=True)
     
     with st.form(key='murajaat_session_form'):
@@ -1710,7 +2176,7 @@ def run_murajaat_assistant(student_data_df, student_id):
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-            # =========================================================================
+        # =========================================================================
         # ✅ NEW: OVERALL SESSION MARK SECTION (for Murajaat)
         # =========================================================================
         st.markdown('<div class="section-header">🎯 Overall Session Mark</div>', unsafe_allow_html=True)
@@ -1969,135 +2435,132 @@ def run_juzhali_assistant(student_data_df, student_id):
         (temp_data['Page_Numeric'] <= juzhali_end)
     ].copy()
     
-    # Health Score
-    st.markdown('<div class="section-header">📊 Juzhali Retention Health</div>', unsafe_allow_html=True)
+    # Health Score - NEW LOGIC WITH GRAPHS
+    st.markdown("### 📊 Juzhali Retention Health")
     
-    if juzhali_data.empty:
-        st.markdown(f"""
-        <div class="info-section">
-            <h3 style="margin: 0 0 10px 0;">ℹ️ No Sessions Recorded Yet</h3>
-            <p style="margin: 0;">
-                Start recording Juzhali sessions for pages {juzhali_start}-{juzhali_end} below!
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        # Look for overall session grades (Session_Summary entries)
-        juzhali_grades_data = juzhali_data[
-            (juzhali_data['Core_Mistake'] == 'Session_Summary') & 
-            (juzhali_data['Overall_Grade'].notna())
-        ]
+    # Get ALL Juzhali Session_Summary entries (not filtered by page range!)
+    all_juzhali_grades = temp_data[
+        (temp_data['Session_Type'] == 'Juzhali') &
+        (temp_data['Core_Mistake'] == 'Session_Summary') &
+        (temp_data['Overall_Grade'].notna())
+    ]
+    
+    if not all_juzhali_grades.empty:
+        # Sort by date
+        all_juzhali_grades = all_juzhali_grades.sort_values('Date')
         
-        if not juzhali_grades_data.empty:
-            # Convert Arabic grades to numeric
-            juzhali_grades = juzhali_grades_data['Overall_Grade'].apply(grade_to_numeric).dropna()
+        # 1. SHOW LATEST GRADE
+        latest = all_juzhali_grades.iloc[-1]  # Most recent
+        st.markdown(f"#### 🎯 Latest Retention Test: **{latest['Overall_Grade']}**")
+        
+        # 2. TREND CHART (Line Graph)
+        st.markdown("#### 📈 Retention Trend Over Time")
+        
+        # Convert grades to numbers for chart
+        grade_map = {'ضعيف': 1, 'متوسط': 2, 'جيد': 3, 'جيد جدا': 4}
+        all_juzhali_grades['Grade_Score'] = all_juzhali_grades['Overall_Grade'].map(grade_map)
+        
+        if len(all_juzhali_grades) > 1:
+            fig = px.line(all_juzhali_grades, x='Date', y='Grade_Score',
+                          title='Juzhali Retention Trend',
+                          markers=True,
+                          labels={'Grade_Score': 'Grade Level', 'Date': 'Test Date'})
             
-            if not juzhali_grades.empty:
-                avg_grade = juzhali_grades.mean()
-                score = (avg_grade / 10) * 100  # Convert to percentage
-                
-                health_class = get_health_color_class(score)
-                health_msg = get_health_message(score)
-                
-                st.markdown(f"""
-                <div class="health-card {health_class}">
-                    <h2 style="margin: 0 0 15px 0;">Juzhali Retention Health</h2>
-                    <h1 style="margin: 0; font-size: 3.5em;">{score:.1f}%</h1>
-                    <p style="margin: 15px 0 0 0; font-size: 1.3em; font-weight: bold;">{health_msg}</p>
-                    <div style="background: rgba(255,255,255,0.3); border-radius: 10px; height: 15px; 
-                                margin-top: 20px; overflow: hidden;">
-                        <div style="background: white; height: 100%; width: {score}%; 
-                                    transition: width 0.5s ease;"></div>
-                    </div>
-                    <p style="margin: 15px 0 0 0; font-size: 0.95em; opacity: 0.9;">
-                        Based on {len(juzhali_grades)} session grades • Average: {avg_grade:.1f}/10
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class="info-section">
-                    <h3 style="margin: 0 0 10px 0;">📊 No Overall Grades Yet</h3>
-                    <p style="margin: 0;">
-                        Start recording sessions with overall grades to see health scores!
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
+            # Add horizontal lines for grade levels
+            fig.add_hline(y=4, line_dash="dash", line_color="green", annotation_text="جيد جدا")
+            fig.add_hline(y=3, line_dash="dash", line_color="blue", annotation_text="جيد")
+            fig.add_hline(y=2, line_dash="dash", line_color="orange", annotation_text="متوسط")
+            fig.add_hline(y=1, line_dash="dash", line_color="red", annotation_text="ضعيف")
+            
+            st.plotly_chart(fig, use_container_width=True)
         else:
-            # ✅ FIXED: Check if columns exist before using them
-            if 'Mistake_Type' in juzhali_data.columns and 'Mistake_Count' in juzhali_data.columns:
-                # New format: Use Talqeen/Tambeeh calculation
-                tot = juzhali_data['Mistake_Count'].sum()
-                tal = juzhali_data[juzhali_data['Mistake_Type'] == 'Talqeen']['Mistake_Count'].sum()
-                score = 100 * (1 - (tal / tot)) if tot > 0 else 100
-                
-                health_class = get_health_color_class(score)
-                health_msg = get_health_message(score)
-                
-                st.markdown(f"""
-                <div class="health-card {health_class}">
-                    <h2 style="margin: 0 0 15px 0;">Juzhali Retention Health</h2>
-                    <h1 style="margin: 0; font-size: 3.5em;">{score:.1f}%</h1>
-                    <p style="margin: 15px 0 0 0; font-size: 1.3em; font-weight: bold;">{health_msg}</p>
-                    <div style="background: rgba(255,255,255,0.3); border-radius: 10px; height: 15px; 
-                                margin-top: 20px; overflow: hidden;">
-                        <div style="background: white; height: 100%; width: {score}%; 
-                                    transition: width 0.5s ease;"></div>
-                    </div>
-                    <p style="margin: 15px 0 0 0; font-size: 0.95em; opacity: 0.9;">
-                        Total: {int(tot)} mistakes • Talqeen: {int(tal)} • Based on {len(juzhali_data)} sessions
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                # Old format: Use grade-based calculation (for uploaded data)
-                if 'Overall_Grade' in juzhali_data.columns:
-                    valid_grades = juzhali_data['Overall_Grade'].dropna()
-                    if not valid_grades.empty:
-                        juzhali_grades = valid_grades.apply(grade_to_numeric).dropna()
-                        if not juzhali_grades.empty:
-                            avg_grade = juzhali_grades.mean()
-                            score = (avg_grade / 10) * 100
-                            
-                            health_class = get_health_color_class(score)
-                            health_msg = get_health_message(score)
-                            
-                            st.markdown(f"""
-                            <div class="health-card {health_class}">
-                                <h2 style="margin: 0 0 15px 0;">Juzhali Retention Health</h2>
-                                <h1 style="margin: 0; font-size: 3.5em;">{score:.1f}%</h1>
-                                <p style="margin: 15px 0 0 0; font-size: 1.3em; font-weight: bold;">{health_msg}</p>
-                                <div style="background: rgba(255,255,255,0.3); border-radius: 10px; height: 15px; 
-                                            margin-top: 20px; overflow: hidden;">
-                                    <div style="background: white; height: 100%; width: {score}%; 
-                                                transition: width 0.5s ease;"></div>
-                                </div>
-                                <p style="margin: 15px 0 0 0; font-size: 0.95em; opacity: 0.9;">
-                                    Based on {len(juzhali_grades)} session grades • Average: {avg_grade:.1f}/10
-                                </p>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        else:
-                            st.markdown("""
-                            <div class="info-section">
-                                <h3 style="margin: 0 0 10px 0;">📊 No Valid Grades</h3>
-                                <p style="margin: 0;">Start recording sessions to see health scores!</p>
-                            </div>
-                            """, unsafe_allow_html=True)
-                    else:
-                        st.markdown("""
-                        <div class="info-section">
-                            <h3 style="margin: 0 0 10px 0;">📊 No Grades Available</h3>
-                            <p style="margin: 0;">Start recording sessions to see health scores!</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+            st.info("📊 *Record more sessions to see the trend chart*")
+        
+        # 3. GRADE DISTRIBUTION PIE CHART
+        st.markdown("#### 📊 Grade Distribution")
+        
+        grade_counts = all_juzhali_grades['Overall_Grade'].value_counts()
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Pie chart
+            fig2 = px.pie(values=grade_counts.values, 
+                         names=grade_counts.index,
+                         title='Grade Distribution',
+                         color=grade_counts.index,
+                         color_discrete_map={
+                             'جيد جدا': '#10b981',
+                             'جيد': '#3b82f6', 
+                             'متوسط': '#f59e0b',
+                             'ضعيف': '#ef4444'
+                         })
+            st.plotly_chart(fig2, use_container_width=True)
+        
+        with col2:
+            # Show grade metrics
+            st.write("**Session Count:**")
+            for grade, count in grade_counts.items():
+                if grade == 'جيد جدا':
+                    emoji = "✅"
+                elif grade == 'جيد':
+                    emoji = "👍"
+                elif grade == 'متوسط':
+                    emoji = "⚠️"
                 else:
-                    st.markdown("""
-                    <div class="info-section">
-                        <h3 style="margin: 0 0 10px 0;">📊 No Data Available</h3>
-                        <p style="margin: 0;">Start recording Juzhali sessions to see health scores!</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    emoji = "❌"
+                
+                st.write(f"{emoji} **{grade}:** {count} sessions")
+            
+            # Calculate average
+            avg_score = all_juzhali_grades['Grade_Score'].mean()
+            st.metric("📊 Average Grade Score", f"{avg_score:.1f}/4.0")
+        
+        # 4. WHAT TO TEST NEXT
+        st.markdown("#### 📅 What to Test Next")
+        
+        # Get last Jadeed page
+        last_jadeed = get_last_jadeed_page(df)
+        if last_jadeed:
+            next_juzhali_start = max(1, last_jadeed - 9)
+            next_juzhali_end = last_jadeed
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("📖 Next Juzhali Range", f"{next_juzhali_start}-{next_juzhali_end}")
+            
+            with col2:
+                # Days since last test
+                days_ago = (pd.Timestamp.now() - latest['Date']).days
+                st.metric("⏰ Days Since Last Test", f"{days_ago} days")
+            
+            with col3:
+                if days_ago > 2:
+                    status = "⏳ Due for Test"
+                    color = "orange"
+                else:
+                    status = "✅ On Track"
+                    color = "green"
+                st.metric("📋 Status", status)
+            
+            st.info(f"**💡 Recommendation:** Test pages **{next_juzhali_start}-{next_juzhali_end}** in your next Juzhali session")
+        
+    else:
+        # NO GRADES YET
+        st.info("""
+        **📝 No Retention Data Yet**
+        
+        **Juzhali Retention Health** will appear here once you record Juzhali sessions with Overall Grades.
+        
+        **How to see retention health:**
+        1. Test OLD memorized pages (9-10 days old)
+        2. Record mistakes during recitation  
+        3. **CRITICAL:** Select Overall Session Grade at bottom
+        4. Submit the session
+        
+        **The Overall Grade (جيد جدا/جيد/متوسط/ضعيف) IS the retention measurement!**
+        """)
     
     st.markdown("<br>", unsafe_allow_html=True)
     
@@ -2109,81 +2572,73 @@ def run_juzhali_assistant(student_data_df, student_id):
     </p>
     """, unsafe_allow_html=True)
     
+    # Debug: Check how many pages we have
+    st.info(f"📊 Displaying {len(page_range_list)} pages: {page_range_list[0]} to {page_range_list[-1]}")
+    
     page_health_map = {}
     
     for page_num in page_range_list:
         p_data = juzhali_data[juzhali_data['Page_Numeric'] == page_num]
         
         if p_data.empty:
-            status = "not_tested"
-            color_code = "#e5e7eb"
-            font_color = "#9ca3af"
-            mistake_summary = "Not tested"
+            page_health_map[page_num] = {
+                "color": "#e5e7eb",
+                "text": "#9ca3af",
+                "summary": "Not tested"
+            }
         else:
-            # ✅ FIXED: Check if columns exist before using them
-            if 'Mistake_Type' in p_data.columns and 'Mistake_Count' in p_data.columns:
-                talqeen_sum = p_data[p_data['Mistake_Type'] == 'Talqeen']['Mistake_Count'].sum()
-                tambeeh_sum = p_data[p_data['Mistake_Type'] == 'Tambeeh']['Mistake_Count'].sum()
-                
-                if talqeen_sum > 0:
-                    status = "critical"
-                    color_code = "#fee2e2"
-                    font_color = "#dc2626"
-                    mistake_summary = f"{int(talqeen_sum)} Tal / {int(tambeeh_sum)} Tam"
-                elif tambeeh_sum >= 3:
-                    status = "weak"
-                    color_code = "#fef3c7"
-                    font_color = "#d97706"
-                    mistake_summary = f"{int(tambeeh_sum)} Tam"
-                else:
-                    status = "good"
-                    color_code = "#d1fae5"
-                    font_color = "#059669"
-                    mistake_summary = "Good ✓"
-            else:
-                # Fallback: Use grade-based status for uploaded data
-                grade_column = None
-                for col in ['Mark', 'Overall_Grade', 'Final_Grade']:
-                    if col in p_data.columns and not p_data[col].isna().all():
-                        grade_column = col
-                        break
-                
-                if grade_column:
-                    p_data_copy = p_data.copy()
-                    p_data_copy['grade_numeric'] = p_data_copy[grade_column].apply(grade_to_numeric)
-                    p_data_copy = p_data_copy.dropna(subset=['grade_numeric'])
+            color_code = "#dbeafe"
+            font_color = "#1d4ed8"
+            summary = "Reviewed"
+            
+            if 'Mistake_Count' in p_data.columns and 'Tambeeh_Count' in p_data.columns:
+                detailed_data = p_data[p_data['Data_Format'] == 'session_entry']
+                if not detailed_data.empty:
+                    talqeen_sum = detailed_data['Mistake_Count'].sum()
+                    tambeeh_sum = detailed_data['Tambeeh_Count'].sum()
+                    calculated_grade = 10 - (talqeen_sum * 1) - (tambeeh_sum * 0.5)
                     
-                    if not p_data_copy.empty:
-                        avg_mark = p_data_copy['grade_numeric'].mean()
+                    if talqeen_sum > 0 or tambeeh_sum > 0:
+                        summary = f"{int(talqeen_sum)}T/{int(tambeeh_sum)}H ({calculated_grade:.1f})"
                     else:
-                        avg_mark = 10
-                else:
-                    avg_mark = 10
+                        summary = f"Perfect! ({calculated_grade:.1f})"
                     
-                if avg_mark <= 7:
-                    status = "critical"
-                    color_code = "#fee2e2"
-                    font_color = "#dc2626"
-                    mistake_summary = f"Grade: {avg_mark:.1f}"
-                elif avg_mark <= 8:
-                    status = "weak"
-                    color_code = "#fef3c7"
-                    font_color = "#d97706"
-                    mistake_summary = f"Grade: {avg_mark:.1f}"
-                else:
-                    status = "good"
-                    color_code = "#d1fae5"
-                    font_color = "#059669"
-                    mistake_summary = f"Grade: {avg_mark:.1f}"
-        
-        page_health_map[page_num] = {
-            "status": status,
-            "color": color_code,
-            "text": font_color,
-            "summary": mistake_summary
-        }
+                    if calculated_grade >= 8:
+                        color_code = "#d1fae5"
+                        font_color = "#059669"
+                    elif calculated_grade >= 7:
+                        color_code = "#fef3c7"
+                        font_color = "#d97706"
+                    else:
+                        color_code = "#fee2e2"
+                        font_color = "#dc2626"
+            
+            elif 'Overall_Grade' in p_data.columns:
+                uploaded_grades = p_data[p_data['Data_Format'] == 'upload']['Overall_Grade']
+                if not uploaded_grades.empty and not uploaded_grades.isna().all():
+                    try:
+                        avg_grade = float(uploaded_grades.iloc[0])
+                        summary = f"Grade: {avg_grade:.1f}"
+                        
+                        if avg_grade >= 8:
+                            color_code = "#d1fae5"
+                            font_color = "#059669"
+                        elif avg_grade >= 7:
+                            color_code = "#fef3c7"
+                            font_color = "#d97706"
+                        else:
+                            color_code = "#fee2e2"
+                            font_color = "#dc2626"
+                    except:
+                        pass
+            
+            page_health_map[page_num] = {
+                "color": color_code,
+                "text": font_color,
+                "summary": summary
+            }
     
-    # Display map
+    # SINGLE DISPLAY LOOP - NO DUPLICATES!
     num_cols = 5
     num_rows = (len(page_range_list) + num_cols - 1) // num_cols
     
@@ -2200,7 +2655,15 @@ def run_juzhali_assistant(student_data_df, student_id):
             with cols[col_idx]:
                 st.markdown(f"""
                 <div class="page-box" style="background-color: {data['color']}; 
-                                            border: 2px solid {data['text']};">
+                                            border: 2px solid {data['text']};
+                                            padding: 10px;
+                                            border-radius: 8px;
+                                            text-align: center;
+                                            margin-bottom: 10px;
+                                            min-height: 80px;
+                                            display: flex;
+                                            flex-direction: column;
+                                            justify-content: center;">
                     <div style="color: {data['text']}; font-size: 1.2em; font-weight: bold;">
                         Page {page_num}
                     </div>
@@ -2211,6 +2674,8 @@ def run_juzhali_assistant(student_data_df, student_id):
                 """, unsafe_allow_html=True)
     
     st.markdown("<br><br>", unsafe_allow_html=True)
+    
+
     
     # Session entry
     st.markdown('<div class="section-header">📝 Record New Session</div>', unsafe_allow_html=True)
